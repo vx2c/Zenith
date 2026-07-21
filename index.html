@@ -9,70 +9,31 @@
     <script defer src="script.js"></script>
   </head>
   <body>
-    <canvas id="particleCanvas" aria-hidden="true"></canvas>
+    <div class="background-shell">
+      <div class="background-overlay"></div>
+    </div>
 
-    <button id="sidebarToggle" class="hidden" aria-label="Toggle sidebar">
-      <span></span>
-      <span></span>
-      <span></span>
-    </button>
-
-    <aside class="sidebar hidden">
-      <div class="sidebar-brand">
-        <div class="logo-mark"></div>
-        <div>
-          <p class="brand-label">ChatGPT</p>
-          <h1>Zenith</h1>
-        </div>
-      </div>
-
-      <div class="sidebar-menu">
-        <button class="menu-item active">History</button>
-        <button class="menu-item">New Chat</button>
-      </div>
-
-      <div class="sidebar-status">
-        <p class="status-title">Status</p>
-        <div class="status-item">
-          <span>Plugin</span>
-          <strong>Wait / On</strong>
-        </div>
-        <div class="status-item">
-          <span>Roblox</span>
-          <strong>Wait / On</strong>
-        </div>
-      </div>
-
-      <div class="sidebar-footer">
-        <div class="profile-row">
-          <div class="avatar">Z</div>
-          <div>
-            <span class="profile-label">Display Name</span>
-            <strong>Zenith Guest</strong>
+    <main class="page-shell">
+      <section class="landing-page active" id="landingPage">
+        <div class="landing-card">
+          <div class="logo-block">
+            <div class="logo-icon">Z</div>
+            <span class="logo-label">ChatGPT</span>
           </div>
-        </div>
-        <button class="button small">Settings</button>
-      </div>
-    </aside>
-
-    <main class="content">
-      <section class="landing-page">
-        <div class="landing-card glass-card">
-          <span class="eyebrow">Zenith</span>
           <h1>Hello, I'm <span>Zenith</span>. What will we do today?</h1>
           <p>Improve Roblox Studio projects with Zenith.</p>
-          <a class="button primary" id="enterDashboard" href="#">Click To Enter</a>
+          <button class="button primary" id="enterDashboard">Click To Enter</button>
         </div>
       </section>
 
-      <section class="dashboard-shell hidden" id="dashboardShell">
-        <div class="dashboard-layout">
-          <div class="dashboard-sidebar">
+      <section class="dashboard-page hidden" id="dashboardPage">
+        <div class="dashboard-frame">
+          <aside class="sidebar-panel">
             <div class="sidebar-brand">
-              <div class="logo-mark"></div>
+              <div class="logo-icon small">Z</div>
               <div>
-                <p class="brand-label">ChatGPT</p>
-                <h1>Zenith</h1>
+                <span class="brand-label">ChatGPT</span>
+                <h2>Zenith</h2>
               </div>
             </div>
 
@@ -103,20 +64,21 @@
               </div>
               <button class="button small">Settings</button>
             </div>
-          </div>
+          </aside>
 
-          <div class="dashboard-main">
-            <div class="dashboard-card glass-card">
+          <section class="dashboard-main">
+            <div class="dashboard-card">
               <div class="panel-top">
                 <div class="panel-logo">Z</div>
                 <div>
-                  <h2>Hello, I'm Zenith</h2>
+                  <span class="panel-tag">ZENITH</span>
+                  <h1>Hello, I'm Zenith.</h1>
                   <p>Your Roblox Studio AI assistant. Ask me anything about Lua or game mechanics.</p>
                 </div>
               </div>
               <div class="panel-note">Roblox not connected — limited functionality</div>
             </div>
-          </div>
+          </section>
         </div>
       </section>
     </main>
