@@ -1,128 +1,96 @@
 <!DOCTYPE html>
-<html lang="es">
+<html lang="en">
   <head>
     <meta charset="UTF-8" />
     <meta http-equiv="X-UA-Compatible" content="IE=edge" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Zenith</title>
-    <link rel="stylesheet" href="/style.css" />
-    <script defer src="/script.js"></script>
+    <title>Zenith | Dashboard</title>
+    <link rel="stylesheet" href="style.css" />
+    <script defer src="script.js"></script>
   </head>
   <body>
     <canvas id="particleCanvas" aria-hidden="true"></canvas>
 
-    <button id="sidebarToggle" aria-label="Mostrar u ocultar menú">
+    <button id="sidebarToggle" aria-label="Toggle navigation">
       <span></span>
       <span></span>
       <span></span>
     </button>
 
     <aside class="sidebar">
-      <div class="brand">
-        <div class="brand-mark"></div>
+      <div class="sidebar-brand">
+        <div class="logo-mark"></div>
         <div>
+          <p class="brand-label">ChatGPT</p>
           <h1>Zenith</h1>
-          <p>Roblox AI Companion</p>
         </div>
       </div>
 
-      <nav>
-        <a href="#home" class="active">Home</a>
-        <a href="#dashboard">Dashboard</a>
-        <a href="#documentation">Documentation</a>
-        <a href="#updates">Updates</a>
-        <a href="#status">Plugin Status</a>
-      </nav>
+      <div class="sidebar-menu">
+        <button class="menu-item active">History</button>
+        <button class="menu-item">New Chat</button>
+      </div>
+
+      <div class="sidebar-status">
+        <p class="status-title">Status</p>
+        <div class="status-item">
+          <span>Plugin</span>
+          <strong>Wait / On</strong>
+        </div>
+        <div class="status-item">
+          <span>Roblox</span>
+          <strong>Wait / On</strong>
+        </div>
+      </div>
 
       <div class="sidebar-footer">
-        <span>Versión 0.1.0</span>
-        <small>Visual UI preview only</small>
+        <div class="profile-row">
+          <div class="avatar">Z</div>
+          <div>
+            <span class="profile-label">Display Name</span>
+            <strong>Zenith Guest</strong>
+          </div>
+        </div>
+        <button class="button small">Settings</button>
       </div>
     </aside>
 
     <main class="content">
-      <section class="hero" id="home">
+      <section class="hero">
         <div class="hero-copy glass-card">
-          <p class="eyebrow">Zenith</p>
-          <h2>Inteligencia Visual para Roblox Studio</h2>
-          <p>
-            Esta primera versión presenta la base visual del dashboard y la
-            experiencia premium de Zenith. Diseño minimalista, sombreado glass,
-            y una interfaz preparada para el futuro.
-          </p>
+          <span class="eyebrow">Welcome</span>
+          <h1>Hello, I'm <span>Zenith</span>. What will we do today?</h1>
+          <p>Improve Roblox Studio projects with Zenith.</p>
           <div class="hero-actions">
-            <a class="button primary" href="#">Download Plugin</a>
-            <a class="button secondary" href="#">Login with Roblox</a>
+            <a class="button primary" href="#dashboard-panel">Click To Enter</a>
+            <a class="button secondary" href="#plugin">Get Plugin</a>
+          </div>
+
+          <div class="prompt-panel glass-card">
+            <label for="prompt">Ask Zenith</label>
+            <input
+              id="prompt"
+              type="text"
+              placeholder="Type your Roblox idea for the AI..."
+            />
           </div>
         </div>
 
-        <div class="hero-stats glass-card">
-          <div class="status-block">
-            <span>Plugin Status</span>
-            <strong>Offline</strong>
+        <div class="hero-panel glass-card" id="dashboard-panel">
+          <div class="panel-header">
+            <p class="eyebrow">Main Dashboard</p>
+            <h2>One view, one focus.</h2>
           </div>
-          <div class="status-block">
-            <span>Current Version</span>
-            <strong>0.1.0</strong>
+          <div class="panel-tags">
+            <span class="tag">AI Prompt</span>
+            <span class="tag">White / Dark</span>
           </div>
-          <div class="status-block">
-            <span>Updates</span>
-            <strong>Ready</strong>
+          <div class="panel-body">
+            <p>
+              This dashboard is the visual home for Zenith. Use it to create new
+              chat prompts, check plugin status, and prepare Roblox Studio projects.
+            </p>
           </div>
-        </div>
-      </section>
-
-      <section class="dashboard" id="dashboard">
-        <div class="section-header">
-          <p class="eyebrow">Dashboard</p>
-          <h3>Visión general</h3>
-        </div>
-        <div class="dashboard-grid">
-          <article class="card glass-card">
-            <h4>Conexión</h4>
-            <p>Preparado para integrar el plugin de Roblox y la conexión futura.</p>
-          </article>
-          <article class="card glass-card">
-            <h4>Explorador</h4>
-            <p>Vista de estructura de proyecto, componentes y jerarquía en desarrollo.</p>
-          </article>
-          <article class="card glass-card">
-            <h4>Lua Assistant</h4>
-            <p>Interfaz visual lista para recibir el asistente de scripting.</p>
-          </article>
-          <article class="card glass-card">
-            <h4>Project Analyzer</h4>
-            <p>Panel conceptual para el análisis de proyecto y métricas futuras.</p>
-          </article>
-        </div>
-      </section>
-
-      <section class="future-flow" id="documentation">
-        <div class="section-header">
-          <p class="eyebrow">Futuras versiones</p>
-          <h3>Camino de crecimiento</h3>
-        </div>
-        <div class="flow-list glass-card">
-          <div class="flow-item">Login Roblox</div>
-          <div class="flow-item">Plugin Connection</div>
-          <div class="flow-item">Explorer Reader</div>
-          <div class="flow-item">Lua Assistant</div>
-          <div class="flow-item">GUI Creator</div>
-          <div class="flow-item">Script Creator</div>
-          <div class="flow-item">Project Analyzer</div>
-          <div class="flow-item">AI Adaptation System</div>
-          <div class="flow-item">Dashboard avanzado</div>
-        </div>
-      </section>
-
-      <section class="docs-preview" id="updates">
-        <div class="glass-card docs-card">
-          <h3>Documentación</h3>
-          <p>
-            Zenith se construye paso a paso. Aquí encontrarás la documentación
-            de la versión inicial y el enlace a futuras actualizaciones.
-          </p>
-          <a class="button tertiary" href="./docs/documentation.html">Abrir documentación</a>
         </div>
       </section>
     </main>
