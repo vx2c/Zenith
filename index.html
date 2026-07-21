@@ -11,13 +11,13 @@
   <body>
     <canvas id="particleCanvas" aria-hidden="true"></canvas>
 
-    <button id="sidebarToggle" aria-label="Toggle navigation">
+    <button id="sidebarToggle" class="hidden" aria-label="Toggle sidebar">
       <span></span>
       <span></span>
       <span></span>
     </button>
 
-    <aside class="sidebar">
+    <aside class="sidebar hidden">
       <div class="sidebar-brand">
         <div class="logo-mark"></div>
         <div>
@@ -56,40 +56,66 @@
     </aside>
 
     <main class="content">
-      <section class="hero">
-        <div class="hero-copy glass-card">
-          <span class="eyebrow">Welcome</span>
+      <section class="landing-page">
+        <div class="landing-card glass-card">
+          <span class="eyebrow">Zenith</span>
           <h1>Hello, I'm <span>Zenith</span>. What will we do today?</h1>
           <p>Improve Roblox Studio projects with Zenith.</p>
-          <div class="hero-actions">
-            <a class="button primary" href="#dashboard-panel">Click To Enter</a>
-            <a class="button secondary" href="#plugin">Get Plugin</a>
-          </div>
-
-          <div class="prompt-panel glass-card">
-            <label for="prompt">Ask Zenith</label>
-            <input
-              id="prompt"
-              type="text"
-              placeholder="Type your Roblox idea for the AI..."
-            />
-          </div>
+          <a class="button primary" id="enterDashboard" href="#">Click To Enter</a>
         </div>
+      </section>
 
-        <div class="hero-panel glass-card" id="dashboard-panel">
-          <div class="panel-header">
-            <p class="eyebrow">Main Dashboard</p>
-            <h2>One view, one focus.</h2>
+      <section class="dashboard-shell hidden" id="dashboardShell">
+        <div class="dashboard-layout">
+          <div class="dashboard-sidebar">
+            <div class="sidebar-brand">
+              <div class="logo-mark"></div>
+              <div>
+                <p class="brand-label">ChatGPT</p>
+                <h1>Zenith</h1>
+              </div>
+            </div>
+
+            <div class="sidebar-menu">
+              <button class="menu-item active">History</button>
+              <button class="menu-item">New Chat</button>
+            </div>
+
+            <div class="sidebar-status">
+              <p class="status-title">Status</p>
+              <div class="status-item">
+                <span>Plugin</span>
+                <strong>Wait / On</strong>
+              </div>
+              <div class="status-item">
+                <span>Roblox</span>
+                <strong>Wait / On</strong>
+              </div>
+            </div>
+
+            <div class="sidebar-footer">
+              <div class="profile-row">
+                <div class="avatar">Z</div>
+                <div>
+                  <span class="profile-label">Display Name</span>
+                  <strong>Zenith Guest</strong>
+                </div>
+              </div>
+              <button class="button small">Settings</button>
+            </div>
           </div>
-          <div class="panel-tags">
-            <span class="tag">AI Prompt</span>
-            <span class="tag">White / Dark</span>
-          </div>
-          <div class="panel-body">
-            <p>
-              This dashboard is the visual home for Zenith. Use it to create new
-              chat prompts, check plugin status, and prepare Roblox Studio projects.
-            </p>
+
+          <div class="dashboard-main">
+            <div class="dashboard-card glass-card">
+              <div class="panel-top">
+                <div class="panel-logo">Z</div>
+                <div>
+                  <h2>Hello, I'm Zenith</h2>
+                  <p>Your Roblox Studio AI assistant. Ask me anything about Lua or game mechanics.</p>
+                </div>
+              </div>
+              <div class="panel-note">Roblox not connected — limited functionality</div>
+            </div>
           </div>
         </div>
       </section>

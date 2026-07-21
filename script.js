@@ -1,13 +1,21 @@
 const sidebar = document.querySelector('.sidebar');
 const toggleButton = document.getElementById('sidebarToggle');
+const dashboardShell = document.getElementById('dashboardShell');
+const enterDashboard = document.getElementById('enterDashboard');
 const canvas = document.getElementById('particleCanvas');
 const ctx = canvas.getContext('2d');
 
 function updateSidebar() {
-  sidebar.classList.toggle('hidden');
+  sidebar.classList.toggle('visible');
 }
 
 toggleButton.addEventListener('click', updateSidebar);
+
+enterDashboard.addEventListener('click', (event) => {
+  event.preventDefault();
+  document.querySelector('.landing-page').classList.add('hidden');
+  dashboardShell.classList.remove('hidden');
+});
 
 const particles = [];
 const particleCount = 80;
