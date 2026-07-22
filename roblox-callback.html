@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Roblox Login Callback</title>
+    <style>
+      body {
+        margin: 0;
+        min-height: 100vh;
+        display: grid;
+        place-items: center;
+        font-family: Inter, system-ui, sans-serif;
+        background: linear-gradient(180deg, #ffffff 0%, #e8e8e8 40%, #111111 100%);
+        color: #111111;
+      }
+
+      .message {
+        max-width: 540px;
+        text-align: center;
+        background: rgba(255, 255, 255, 0.94);
+        border-radius: 28px;
+        padding: 34px 28px;
+        box-shadow: 0 32px 90px rgba(0, 0, 0, 0.14);
+      }
+
+      .message h1 {
+        margin: 0 0 18px;
+        font-size: clamp(2rem, 2.5vw, 2.6rem);
+      }
+
+      .message p {
+        margin: 16px 0 0;
+        color: #4b5563;
+        line-height: 1.8;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="message">
+      <h1>Logging in with Roblox...</h1>
+      <p>If nothing happens automatically, please return to the main page and try again.</p>
+    </div>
+    <script>
+      async function doCallback() {
+        const params = new URLSearchParams(window.location.search);
+        const code = params.get('code');
+        const state = params.get('state');
+        const savedState = localStorage.getItem('roblox_oauth_state');
+        const statusElement = document.querySelector('.message p');
+
+        if (!code || !state || !savedState || state !== savedState) {
+          statusElement.textContent = 'Invalid login response from Roblox. Make sure the redirect URI is registered correctly.';
+          return;
+        }
+
+        localStorage.removeItem('roblox_oauth_state');
+
+        try {
+          const tokenResponse = await fetch('/api/roblox-callback', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ code, redirect_uri: window.location.origin + '/roblox-callback.html' }),
+          });
+
+          if (!tokenResponse.ok) {
+            const errorText = await tokenResponse.text();
+            statusElement.textContent = `Login failed: ${errorText}`;
+            return;
+          }
+
+          const tokenData = await tokenResponse.json();
+          localStorage.setItem('roblox_user_name', tokenData.displayName || 'Roblox user');
+          window.location.href = '/';
+        } catch (error) {
+          statusElement.textContent = 'Unable to complete Roblox login. Please try again.';
+          console.error(error);
+        }
+      }
+
+      doCallback();
+    </script>
+  </body>
+</html>
