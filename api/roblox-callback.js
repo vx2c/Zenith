@@ -35,8 +35,8 @@ module.exports = async function handler(request, response) {
     return response.status(400).json({ error: 'Missing required OAuth parameters' });
   }
 
-  const clientId = process.env.ROBLOX_CLIENT_ID || '1113911995308598210';
-  const clientSecret = process.env.ROBLOX_CLIENT_SECRET || 'RBX-AwpfZAVRLkqB2qAWPnsP1StPh-NGqECozY-N_xHIqEucsH_IKLrM9ehWtlVgG2Cx';
+  const clientId = process.env.ROBLOX_CLIENT_ID || '5946408965210042968';
+  const clientSecret = process.env.ROBLOX_CLIENT_SECRET || 'RBX-Uq1UR8as7UWUIBZI96TK21DwjDivE4ZioCjW86BnebM8PAG_HJhI-ndFnsTWQPq3';
   const tokenUrl = 'https://apis.roblox.com/oauth/v1/token';
 
   const params = new URLSearchParams();
