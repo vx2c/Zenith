@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1" />
+    <title>Zenith</title>
+    <meta name="description" content="Zenith — Studio AI Companion for Roblox developers." />
+    <meta name="robots" content="index, follow" />
+    <meta property="og:title" content="Zenith" />
+    <meta property="og:description" content="Zenith — Studio AI Companion for Roblox developers." />
+    <meta property="og:type" content="website" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="Zenith" />
+    <meta name="twitter:description" content="Zenith — Studio AI Companion for Roblox developers." />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="/style.css" />
+  </head>
+  <body>
+    <div class="background-shell"></div>
+    <div class="background-overlay"></div>
+    <div class="page-shell">
+
+      <!-- Landing Page -->
+      <section id="landingPage" class="landing-page">
+        <div class="landing-card">
+          <div class="logo-block">
+            <div class="logo-icon">Z</div>
+            <span class="logo-label">Zenith</span>
+          </div>
+          <h1><span>Studio AI<br />Companion</span></h1>
+          <p>
+            Your intelligent assistant for Roblox Studio development.
+            Connect your Roblox account to get started with AI-powered
+            scripting, debugging, and workflow automation.
+          </p>
+          <button id="loginRoblox" class="button primary">Connect with Roblox</button>
+        </div>
+      </section>
+
+      <!-- Dashboard Page -->
+      <section id="dashboardPage" class="dashboard-page hidden">
+        <div class="dashboard-frame">
+
+          <!-- Sidebar -->
+          <aside class="sidebar-panel">
+            <div class="sidebar-brand">
+              <div class="logo-icon" style="width:40px;height:40px;font-size:1rem;border-radius:14px;">Z</div>
+              <div>
+                <div class="brand-label">Zenith</div>
+                <h2>Studio AI</h2>
+              </div>
+            </div>
+
+            <nav>
+              <button class="menu-item active">AI Assistant</button>
+              <button class="menu-item">Script Editor</button>
+              <button class="menu-item">Debugger</button>
+              <button class="menu-item">Workflows</button>
+            </nav>
+
+            <div class="sidebar-status">
+              <div class="status-item">
+                <span class="status-title">Studio</span>
+                <span>Connected</span>
+              </div>
+              <div class="status-item">
+                <span class="status-title">AI Model</span>
+                <span>Active</span>
+              </div>
+            </div>
+
+            <div class="sidebar-footer">
+              <div class="profile-row">
+                <div class="avatar" id="avatarInitial">R</div>
+                <div>
+                  <div class="profile-label">Signed in as</div>
+                  <strong id="connectionStatus">Roblox user</strong>
+                </div>
+              </div>
+            </div>
+          </aside>
+
+          <!-- Main Panel -->
+          <main class="dashboard-main">
+            <div class="dashboard-card">
+              <div class="panel-top">
+                <div class="panel-logo">Z</div>
+                <div>
+                  <span class="panel-tag">Studio AI Companion</span>
+                  <h1><span>Welcome<br />to Zenith</span></h1>
+                </div>
+              </div>
+              <p>
+                Zenith is your AI-powered companion inside Roblox Studio. Use the
+                sidebar to access the AI assistant, script editor, debugger, and
+                workflow automation tools.
+              </p>
+              <div class="panel-note">
+                🚀 &nbsp;AI Assistant ready — open a script in Studio and start building.
+              </div>
+            </div>
+          </main>
+
+        </div>
+      </section>
+
+    </div>
+    <script src="/script.js"></script>
+  </body>
+</html>
