@@ -2,85 +2,23 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Zenith | Dashboard</title>
-    <link rel="stylesheet" href="style.css" />
-    <script defer src="script.js"></script>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1" />
+    <title>Zenith</title>
+    <meta name="description" content="Zenith — built on Replit. Update this description to reflect the app." />
+    <meta name="robots" content="index, follow" />
+    <meta property="og:title" content="Zenith" />
+    <meta property="og:description" content="Zenith — built on Replit. Update this description to reflect the app." />
+    <meta property="og:type" content="website" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="Zenith" />
+    <meta name="twitter:description" content="Zenith — built on Replit. Update this description to reflect the app." />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
   </head>
   <body>
-    <div class="background-shell">
-      <div class="background-overlay"></div>
-    </div>
-
-    <main class="page-shell">
-      <section class="landing-page active" id="landingPage">
-        <div class="landing-card">
-          <div class="logo-block">
-            <div class="logo-icon">Z</div>
-            <span class="logo-label">ChatGPT</span>
-          </div>
-          <h1>Hello, I'm <span>Zenith</span>. What will we do today?</h1>
-          <p>Improve Roblox Studio projects with Zenith.</p>
-          <button class="button primary" id="loginRoblox">Login with Roblox</button>
-        </div>
-      </section>
-
-      <section class="dashboard-page hidden" id="dashboardPage">
-        <div class="dashboard-frame">
-          <aside class="sidebar-panel">
-            <div class="sidebar-brand">
-              <div class="logo-icon small">Z</div>
-              <div>
-                <span class="brand-label">ChatGPT</span>
-                <h2>Zenith</h2>
-              </div>
-            </div>
-
-            <div class="sidebar-menu">
-              <button class="menu-item active">History</button>
-              <button class="menu-item">New Chat</button>
-            </div>
-
-            <div class="sidebar-status">
-              <p class="status-title">Status</p>
-              <div class="status-item">
-                <span>Plugin</span>
-                <strong>Wait / On</strong>
-              </div>
-              <div class="status-item">
-                <span>Roblox</span>
-                <strong>Wait / On</strong>
-              </div>
-            </div>
-
-            <div class="sidebar-footer">
-              <div class="profile-row">
-                <div class="avatar">Z</div>
-                <div>
-                  <span class="profile-label">Display Name</span>
-                  <strong>Zenith Guest</strong>
-                </div>
-              </div>
-              <button class="button small">Settings</button>
-            </div>
-          </aside>
-
-          <section class="dashboard-main">
-            <div class="dashboard-card">
-              <div class="panel-top">
-                <div class="panel-logo">Z</div>
-                <div>
-                  <span class="panel-tag">ZENITH</span>
-                  <h1>Hello, I'm Zenith.</h1>
-                  <p>Your Roblox Studio AI assistant. Ask me anything about Lua or game mechanics.</p>
-                </div>
-              </div>
-              <div class="panel-note" id="connectionStatus">Roblox not connected — limited functionality</div>
-            </div>
-          </section>
-        </div>
-      </section>
-    </main>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
