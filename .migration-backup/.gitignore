@@ -1,0 +1,13 @@
+# Node and editor artifacts
+node_modules/
+.DS_Store
+Thumbs.db
+.vscode/
+*.log
+
+# Vercel local settings
+.vercel/
+
+# System files
+*.tmp
+*.cache
