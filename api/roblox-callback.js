@@ -18,7 +18,7 @@ function parseJsonBody(request) {
   });
 }
 
-export default async function handler(request, response) {
+module.exports = async function handler(request, response) {
   if (request.method !== 'POST') {
     return response.status(405).json({ error: 'Method not allowed' });
   }
@@ -39,13 +39,12 @@ export default async function handler(request, response) {
   const clientSecret = process.env.ROBLOX_CLIENT_SECRET || 'RBX-9etoIKe0iUSVTY0IvIWi5yDr5FecfJT6bs-y1PJslxlDHQBII1y5D2DVxe_mt8qP';
   const tokenUrl = 'https://apis.roblox.com/oauth/v1/token';
 
-  const params = new URLSearchParams({
-    grant_type: 'authorization_code',
-    code,
-    redirect_uri,
-    client_id: clientId,
-    client_secret: clientSecret,
-  });
+  const params = new URLSearchParams();
+  params.append('grant_type', 'authorization_code');
+  params.append('code', code);
+  params.append('redirect_uri', redirect_uri);
+  params.append('client_id', clientId);
+  params.append('client_secret', clientSecret);
 
   try {
     const fetchResponse = await fetch(tokenUrl, {
@@ -73,4 +72,4 @@ export default async function handler(request, response) {
   } catch (error) {
     return response.status(500).json({ error: 'Unable to complete OAuth exchange', details: error.message });
   }
-}
+};

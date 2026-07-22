@@ -2,7 +2,6 @@
   "name": "zenith",
   "version": "0.1.0",
   "private": true,
-  "type": "module",
   "description": "Zenith landing page prototype for Roblox Studio AI companion.",
   "scripts": {
     "start": "echo Open index.html in the browser"
