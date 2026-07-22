@@ -5,20 +5,6 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
-export interface HealthStatus {
-  status: string;
-}
-
-export interface ErrorResponse {
-  error: string;
-  /** @nullable */
-  details?: string | null;
-}
-
-export interface RobloxCallbackInput {
-  code: string;
-  redirect_uri: string;
-}
 
 export interface RobloxTokenResponse {
   accessToken: string;
@@ -32,4 +18,3 @@ export interface RobloxTokenResponse {
   /** @nullable */
   displayName?: string | null;
 }
-

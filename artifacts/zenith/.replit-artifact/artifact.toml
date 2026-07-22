@@ -1,0 +1,27 @@
+kind = "web"
+previewPath = "/"
+title = "Zenith"
+version = "1.0.0"
+id = "artifacts/zenith"
+router = "path"
+
+[[services]]
+name = "web"
+paths = [ "/" ]
+localPort = 22192
+
+[services.development]
+run = "pnpm --filter @workspace/zenith run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/zenith", "run", "build" ]
+serve = "static"
+publicDir = "artifacts/zenith/dist/public"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "22192"
+BASE_PATH = "/"

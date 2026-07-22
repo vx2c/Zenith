@@ -1,45 +1,33 @@
-# [Project name]
+# Zenith
 
-_Replace the heading above with the project's name, and this line with one sentence describing what this app does for users._
+Zenith is a Roblox Studio AI companion web app. It lets Roblox developers connect their Roblox account via OAuth and access an AI-powered dashboard for scripting, debugging, and workflow automation inside Roblox Studio.
 
-## Run & Operate
+## Architecture
 
-- `pnpm --filter @workspace/api-server run dev` — run the API server (port 5000)
-- `pnpm run typecheck` — full typecheck across all packages
-- `pnpm run build` — typecheck + build all packages
-- `pnpm --filter @workspace/api-spec run codegen` — regenerate API hooks and Zod schemas from the OpenAPI spec
-- `pnpm --filter @workspace/db run push` — push DB schema changes (dev only)
-- Required env: `DATABASE_URL` — Postgres connection string
+- **Frontend**: React + Vite app at `artifacts/zenith/` — serves the landing page and dashboard
+- **API Server**: Express 5 at `artifacts/api-server/` — handles the Roblox OAuth token exchange
+- **Shared libs**: `lib/api-spec/` (OpenAPI), `lib/api-client-react/` (generated hooks), `lib/api-zod/` (Zod schemas)
 
-## Stack
+## Roblox OAuth
 
-- pnpm workspaces, Node.js 24, TypeScript 5.9
-- API: Express 5
-- DB: PostgreSQL + Drizzle ORM
-- Validation: Zod (`zod/v4`), `drizzle-zod`
-- API codegen: Orval (from OpenAPI spec)
-- Build: esbuild (CJS bundle)
+The app uses Roblox OAuth 2.0 (openid + profile scopes).
 
-## Where things live
+- Public CLIENT_ID `4229742603179424213` is hardcoded in the frontend (safe — it's a public identifier)
+- `ROBLOX_CLIENT_ID` and `ROBLOX_CLIENT_SECRET` must be set as Replit Secrets for the API server to exchange codes for tokens
+- OAuth redirect URI: `<origin>/roblox-callback`
 
-_Populate as you build — short repo map plus pointers to the source-of-truth file for DB schema, API contracts, theme files, etc._
+## Key routes
 
-## Architecture decisions
+- `/` — Landing page (unauthenticated) or Dashboard (authenticated via localStorage `roblox_user_name`)
+- `/roblox-callback` — OAuth callback handler page
+- `/api/roblox-callback` (POST) — Token exchange endpoint in the API server
 
-_Populate as you build — non-obvious choices a reader couldn't infer from the code (3-5 bullets)._
+## Running
 
-## Product
-
-_Describe the high-level user-facing capabilities of this app once they exist._
+Workflows are managed by Replit:
+- `artifacts/zenith: web` — Vite dev server (frontend)
+- `artifacts/api-server: API Server` — Express backend
 
 ## User preferences
 
-_Populate as you build — explicit user instructions worth remembering across sessions._
-
-## Gotchas
-
-_Populate as you build — sharp edges, "always run X before Y" rules._
-
-## Pointers
-
-- See the `pnpm-workspace` skill for workspace structure, TypeScript setup, and package details
+- Preserve original Zenith monochrome palette: `#111111` primary, `#f6f6f6` background, frosted-glass cards

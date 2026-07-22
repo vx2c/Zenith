@@ -10,6 +10,8 @@ servers:
 tags:
   - name: health
     description: Health operations
+  - name: auth
+    description: Authentication operations
 paths:
   /healthz:
     get:
@@ -24,6 +26,36 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthStatus"
+  /roblox-callback:
+    post:
+      operationId: robloxCallback
+      tags: [auth]
+      summary: Exchange Roblox OAuth code for tokens
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RobloxCallbackInput"
+      responses:
+        "200":
+          description: Token exchange successful
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RobloxTokenResponse"
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "502":
+          description: Token exchange with Roblox failed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
 components:
   schemas:
     HealthStatus:
@@ -33,4 +65,36 @@ components:
           type: string
       required:
         - status
-
+    ErrorResponse:
+      type: object
+      properties:
+        error:
+          type: string
+        details:
+          type: ["string", "null"]
+      required:
+        - error
+    RobloxCallbackInput:
+      type: object
+      required: [code, redirect_uri]
+      properties:
+        code:
+          type: string
+        redirect_uri:
+          type: string
+    RobloxTokenResponse:
+      type: object
+      required: [accessToken, tokenType]
+      properties:
+        accessToken:
+          type: string
+        tokenType:
+          type: string
+        expiresIn:
+          type: ["integer", "null"]
+        refreshToken:
+          type: ["string", "null"]
+        scope:
+          type: ["string", "null"]
+        displayName:
+          type: ["string", "null"]
