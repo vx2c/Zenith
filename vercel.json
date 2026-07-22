@@ -1,9 +1,9 @@
 {
   "version": 2,
-  "buildCommand": null,
-  "installCommand": null,
-  "framework": null,
+  "installCommand": "echo skip",
+  "buildCommand": "echo skip",
   "outputDirectory": ".",
+  "framework": null,
   "rewrites": [
     { "source": "/roblox-callback", "destination": "/roblox-callback.html" }
   ]
