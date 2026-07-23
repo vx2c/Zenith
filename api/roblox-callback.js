@@ -1,75 +1,71 @@
-function parseJsonBody(request) {
+function parseJsonBody(req) {
   return new Promise((resolve, reject) => {
     let body = '';
-    request.on('data', (chunk) => {
-      body += chunk;
+    req.on('data', c => (body += c));
+    req.on('end', () => {
+      try { resolve(body ? JSON.parse(body) : {}); }
+      catch (e) { reject(e); }
     });
-    request.on('end', () => {
-      if (!body) {
-        return resolve({});
-      }
-      try {
-        resolve(JSON.parse(body));
-      } catch (error) {
-        reject(error);
-      }
-    });
-    request.on('error', reject);
+    req.on('error', reject);
   });
 }
 
-module.exports = async function handler(request, response) {
-  if (request.method !== 'POST') {
-    return response.status(405).json({ error: 'Method not allowed' });
-  }
+function decodeJwtPayload(token) {
+  try {
+    const b64 = token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/');
+    return JSON.parse(Buffer.from(b64, 'base64').toString('utf8'));
+  } catch { return {}; }
+}
+
+module.exports = async function handler(req, res) {
+  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
   let body;
-  try {
-    body = await parseJsonBody(request);
-  } catch (error) {
-    return response.status(400).json({ error: 'Invalid JSON body' });
-  }
+  try { body = await parseJsonBody(req); }
+  catch { return res.status(400).json({ error: 'Invalid JSON body' }); }
 
   const { code, redirect_uri } = body || {};
-  if (!code || !redirect_uri) {
-    return response.status(400).json({ error: 'Missing required OAuth parameters' });
-  }
+  if (!code || !redirect_uri) return res.status(400).json({ error: 'Missing required OAuth parameters' });
 
-  const clientId = process.env.ROBLOX_CLIENT_ID || '5946408965210042968';
-  const clientSecret = process.env.ROBLOX_CLIENT_SECRET || 'RBX-Uq1UR8as7UWUIBZI96TK21DwjDivE4ZioCjW86BnebM8PAG_HJhI-ndFnsTWQPq3';
-  const tokenUrl = 'https://apis.roblox.com/oauth/v1/token';
+  const clientId     = process.env.ROBLOX_CLIENT_ID;
+  const clientSecret = process.env.ROBLOX_CLIENT_SECRET;
+  if (!clientId || !clientSecret)
+    return res.status(500).json({ error: 'Server misconfigured: missing Roblox credentials' });
 
-  const params = new URLSearchParams();
-  params.append('grant_type', 'authorization_code');
-  params.append('code', code);
-  params.append('redirect_uri', redirect_uri);
-  params.append('client_id', clientId);
-  params.append('client_secret', clientSecret);
+  const params = new URLSearchParams({
+    grant_type:    'authorization_code',
+    code,
+    redirect_uri,
+    client_id:     clientId,
+    client_secret: clientSecret,
+  });
 
   try {
-    const fetchResponse = await fetch(tokenUrl, {
+    const tokenRes = await fetch('https://apis.roblox.com/oauth/v1/token', {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/x-www-form-urlencoded',
-      },
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: params.toString(),
     });
 
-    if (!fetchResponse.ok) {
-      const errorData = await fetchResponse.text();
-      return response.status(502).json({ error: 'Token exchange failed', details: errorData });
+    if (!tokenRes.ok) {
+      const err = await tokenRes.text();
+      return res.status(502).json({ error: 'Token exchange failed', details: err });
     }
 
-    const tokenData = await fetchResponse.json();
-    return response.status(200).json({
-      accessToken: tokenData.access_token,
-      tokenType: tokenData.token_type,
-      expiresIn: tokenData.expires_in,
+    const tokenData = await tokenRes.json();
+    const claims    = tokenData.id_token ? decodeJwtPayload(tokenData.id_token) : {};
+
+    return res.status(200).json({
+      accessToken:  tokenData.access_token,
+      tokenType:    tokenData.token_type,
+      expiresIn:    tokenData.expires_in,
       refreshToken: tokenData.refresh_token,
-      scope: tokenData.scope,
-      displayName: tokenData.displayName || null,
+      scope:        tokenData.scope,
+      displayName:  claims.name || tokenData.displayName || null,
+      username:     claims.preferred_username || null,
+      userId:       claims.sub || null,
     });
-  } catch (error) {
-    return response.status(500).json({ error: 'Unable to complete OAuth exchange', details: error.message });
+  } catch (e) {
+    return res.status(500).json({ error: 'Unable to complete OAuth exchange', details: e.message });
   }
 };
