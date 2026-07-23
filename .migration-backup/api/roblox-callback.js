@@ -36,7 +36,7 @@ module.exports = async function handler(request, response) {
   }
 
   const clientId = process.env.ROBLOX_CLIENT_ID || '5946408965210042968';
-  const clientSecret = process.env.ROBLOX_CLIENT_SECRET || 'RBX-Uq1UR8as7UWUIBZI96TK21DwjDivE4ZioCjW86BnebM8PAG_HJhI-ndFnsTWQPq3';
+  const clientSecret = process.env.ROBLOX_CLIENT_SECRET || 'RBX-hELIICbeCkOtlN72BvUJ66sKX2xeR_nESpxVVdUs3PFvGz1h7o4StB5IEKfTSGY4';
   const tokenUrl = 'https://apis.roblox.com/oauth/v1/token';
 
   const params = new URLSearchParams();
