@@ -66,7 +66,7 @@
           const res = await fetch('/api/roblox-callback', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ code, redirect_uri: window.location.origin + '/roblox-callback.html' }),
+            body: JSON.stringify({ code, redirect_uri: window.location.origin + '/roblox-callback' }),
           });
 
           if (!res.ok) {

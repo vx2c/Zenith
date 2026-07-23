@@ -4,7 +4,7 @@
 
 const OAUTH_URL   = 'https://apis.roblox.com/oauth/v1/authorize';
 const CLIENT_ID   = '8019894370613982106';
-const REDIRECT    = window.location.origin + '/roblox-callback.html';
+const REDIRECT    = window.location.origin + '/roblox-callback';
 const SCOPES      = 'openid profile';
 
 const state = {
