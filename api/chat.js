@@ -88,11 +88,43 @@ async function executeStudioTool(sessionId, toolName, args) {
 
 // ── Parse TOOL:{...} lines from AI text output ─────────────────────────────
 function extractToolCall(text) {
-  // Match TOOL:{...} on its own line (possibly with leading whitespace)
-  const match = text.match(/TOOL:\s*(\{[\s\S]*?\})\s*(?:\n|$)/);
-  if (!match) return null;
+  // Find "TOOL:" then extract a balanced JSON object.
+  // The old regex /TOOL:\s*(\{[\s\S]*?\})/ was non-greedy and stopped at
+  // the FIRST closing brace, breaking any tool call whose args contain nested
+  // JSON objects (e.g. create_script with an args object). This parser counts
+  // braces so it always finds the correct closing brace.
+  const prefix = 'TOOL:';
+  const idx = text.indexOf(prefix);
+  if (idx === -1) return null;
+
+  let start = idx + prefix.length;
+  // Skip optional whitespace between "TOOL:" and "{"
+  while (start < text.length && /\s/.test(text[start])) start++;
+  if (text[start] !== '{') return null;
+
+  let depth = 0;
+  let inString = false;
+  let escape = false;
+  let end = -1;
+
+  for (let i = start; i < text.length; i++) {
+    const ch = text[i];
+    if (escape) { escape = false; continue; }
+    if (ch === '\\' && inString) { escape = true; continue; }
+    if (ch === '"') { inString = !inString; continue; }
+    if (inString) continue;
+    if (ch === '{') depth++;
+    else if (ch === '}') {
+      depth--;
+      if (depth === 0) { end = i; break; }
+    }
+  }
+
+  if (end === -1) return null; // unbalanced braces — AI truncated the JSON
+
+  const jsonStr = text.slice(start, end + 1);
   try {
-    return JSON.parse(match[1]);
+    return JSON.parse(jsonStr);
   } catch {
     return null;
   }
