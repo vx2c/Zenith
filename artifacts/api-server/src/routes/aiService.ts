@@ -13,10 +13,13 @@ const SITE_NAME       = "Zenith - Roblox Studio AI";
 
 // ── Model registry ───────────────────────────
 
+// Updated 2025-07: previous models (qwen3-coder, deepseek-r1, gemma-3-27b)
+// are no longer available on OpenRouter free tier.
 export const FALLBACK_CHAIN = [
-  "qwen/qwen3-coder:free",
-  "deepseek/deepseek-r1:free",
-  "google/gemma-3-27b-it:free",
+  "google/gemma-4-31b-it:free",
+  "openai/gpt-oss-20b:free",
+  "cohere/north-mini-code:free",
+  "poolside/laguna-m.1:free",
 ] as const;
 
 export type ModelId = (typeof FALLBACK_CHAIN)[number] | (string & {});
