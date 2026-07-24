@@ -22,7 +22,8 @@ function buildPluginContext(): string | null {
 }
 
 router.post("/chat", async (req, res): Promise<void> => {
-  const { messages = [], model }: { messages: ChatMessage[]; model?: string } = req.body;
+  const { messages = [], model, sessionId }: { messages: ChatMessage[]; model?: string; sessionId?: string } = req.body;
+  console.log("SESSION:", sessionId);
   const pluginContext = buildPluginContext();
 
   res.setHeader("Content-Type",       "text/event-stream");

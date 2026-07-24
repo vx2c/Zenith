@@ -202,7 +202,6 @@ function useChat(sessionId?: string | null) {
     let finalModel: string | null = null;
     try {
       console.log("CHAT SESSION:", sessionId);
-      console.log("SESSION SENT:", sessionId);
       const res = await fetch(`${BASE}/api/chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -654,6 +653,7 @@ function AssistantPanel({ isDark, lang, pluginSession }: { isDark: boolean; lang
   const T = TRANSLATIONS[lang];
   const th = mkTheme(isDark);
   const sessionId = pluginSession?.sessionId ?? null;
+  console.log("ASSISTANT SESSION:", sessionId);
   const {
     messages, input, setInput, loading, error, activeModel,
     thinkingMode, setThinkingMode, searchMode, setSearchMode,
@@ -959,6 +959,11 @@ export default function Dashboard({ userName }: DashboardProps) {
   const T = TRANSLATIONS[lang];
   const th = mkTheme(isDark);
   const pluginStatus = usePluginStatus();
+  const activePluginSession = pluginStatus?.sessions?.[0] ?? null;
+
+  useEffect(() => {
+    console.log("PLUGIN SESSION:", activePluginSession);
+  }, [activePluginSession?.sessionId]);
 
   const [activeNav, setActiveNav] = useState('home');
   const [sidebarOpen, setSidebarOpen] = useState(true);
@@ -1099,7 +1104,7 @@ export default function Dashboard({ userName }: DashboardProps) {
           transition: 'all 0.3s cubic-bezier(0.4,0,0.2,1)',
         }}>
           {activeNav === 'home'      && <HomePanel userName={userName} isDark={isDark} lang={lang} />}
-          {activeNav === 'assistant' && <AssistantPanel isDark={isDark} lang={lang} pluginSession={pluginStatus?.sessions?.[0] ?? null} />}
+          {activeNav === 'assistant' && <AssistantPanel isDark={isDark} lang={lang} pluginSession={activePluginSession} />}
           {activeNav === 'settings'  && (
             <SettingsPanel isDark={isDark} lang={lang} onSetTheme={setTheme} onSetLang={setLanguage} />
           )}
