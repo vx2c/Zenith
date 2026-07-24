@@ -1,0 +1,52 @@
+puedes ver mi explorer ahora mismo? de roblox studios Pvp Tasers [ Beta ]
+Z
+Zenith
+¡Claro! No puedo “ver” tu Explorer directamente, pero puedo guiarte para que lo compartas conmigo o para que extraigas su estructura con un script y luego lo puedas copiar‑pegar aquí.
+
+### 1️⃣ Opción rápida: Copia la estructura a un texto
+1. Abre tu Explorer (Ver ▸ Explorer).
+2. Mantén pulsada la tecla Ctrl y haz clic en cada nodo que quieras incluir (puedes soltar Ctrl una vez que tengas todos los nodos).
+3. Copia (Ctrl + C) y pega (Ctrl + V) la lista en un archivo de texto o directamente en el chat.
+
+Esto te da algo parecido a:
+
+Workspace
+├─ PlayerSpawns
+│   ├─ Spawn1
+│   └─ Spawn2
+├─ Enemies
+│   ├─ EnemyA
+│   ├─ EnemyB
+│   └─ ...
+### 2️⃣ Opción programática: exporta la jerarquía con un Script
+
+Si tu Explorer es grande oуги necesitas información más detallada (propiedades, nombres de hijos, etc.), puedes usar este Script en un Script dentro de ServerScriptService:
+
+local function dumpTree(parent, indent)
+    indent = indent or ""
+    for _, child in ipairs(parent:GetChildren()) do
+        local className =plays(child) then "Instance" else child.ClassName end
+        print(indent .. "- " .. child.Name .. " (" .. child.ClassName .. ")")
+        dumpTree(child, indent .. "  ")
+    end
+end
+-- Cambia 'Workspace' por cualquier nodo raíz que quieras inspeccionar
+dumpTree(workspace)
+
+1. Copia el código y pégalo en un Script dentro de ServerScriptService.
+2. Ejecuta el juego en modo Play (F5).
+3. Abre la Ventana de Salida (View ▸ Output) y verás la lista jerárquica completa.
+
+### 3️⃣ ¿Qué hacer con esos datos?
+
+- Guardarlos en un archivo: puedes usar writefile si estás en un entorno de desarrollo podó (solo en Roblox Studio Plugins), pero para la mayoría basta con copiar la salida del Output.
+- Compararlos: Si lo que buscas es encontrar errores con tu estructura, compárala con la documentación del plugin "PVP Tasers" o con la guía oficial de la API.
+
+---
+
+¿Qué necesitas exactamente?
+- ¿Quieres que te ayude a detectar un objeto específico (por ejemplo, una cámara de la Player)?
+- ¿Buscas reorganizar partes del modelo para optimizar rendimiento?
+- ¿Quieres que añada un script que interactúe con esa jerarquía?
+
+Cuéntame un poco más y te envío el código o la guía precisa. 😉
