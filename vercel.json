@@ -4,7 +4,20 @@
   "buildCommand": "echo skip",
   "outputDirectory": ".",
   "framework": null,
+  "headers": [
+    {
+      "source": "/api/(.*)",
+      "headers": [
+        { "key": "Access-Control-Allow-Origin", "value": "*" },
+        { "key": "Access-Control-Allow-Methods", "value": "GET, POST, OPTIONS" },
+        { "key": "Access-Control-Allow-Headers", "value": "Content-Type" }
+      ]
+    }
+  ],
   "rewrites": [
-    { "source": "/roblox-callback", "destination": "/roblox-callback.html" }
+    { "source": "/roblox-callback", "destination": "/roblox-callback.html" },
+    { "source": "/connect",         "destination": "/api/connect" },
+    { "source": "/heartbeat",       "destination": "/api/heartbeat" },
+    { "source": "/command_result",  "destination": "/api/command_result" }
   ]
 }
