@@ -94,7 +94,7 @@ function getStatus() {
   };
 }
 
-module.exports = { streamChat, getStatus, DEFAULT_MODEL, FALLBACK_CHAIN, PROVIDERS };
+module.exports = { streamChat, getStatus, DEFAULT_MODEL, FALLBACK_CHAIN, PROVIDERS, OPENROUTER_BASE };
 
 // ─────────────────────────────────────────────
 //  Internal helpers
