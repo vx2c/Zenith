@@ -1,6 +1,6 @@
 import { Cpu } from 'lucide-react';
 
-const CLIENT_ID = '4229742603179424213';
+const CLIENT_ID = '5954617612200319484';
 
 export default function Landing() {
   const handleLogin = () => {
