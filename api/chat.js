@@ -47,7 +47,7 @@ module.exports = async function handler(req, res) {
   res.flushHeaders();
 
   try {
-    const streamUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:streamGenerateContent?alt=sse&key=${apiKey}`;
+    const streamUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-lite:streamGenerateContent?alt=sse&key=${apiKey}`;
     const geminiRes = await fetch(streamUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
