@@ -156,11 +156,21 @@ function initMainMenu() {
 }
 
 // ── Auth ──────────────────────────────────────
-function openLogin() {
+async function openLogin() {
+  // Fetch the canonical client_id from the server so it always matches the backend credentials.
+  let clientId = CLIENT_ID; // fallback to hardcoded if the endpoint fails
+  try {
+    const r = await fetch('/api/config');
+    if (r.ok) {
+      const cfg = await r.json();
+      if (cfg.clientId) clientId = cfg.clientId;
+    }
+  } catch { /* use fallback */ }
+
   const s = Math.random().toString(36).slice(2);
   localStorage.setItem('roblox_oauth_state', s);
   location.href = `${OAUTH_URL}?${new URLSearchParams({
-    client_id: CLIENT_ID, redirect_uri: REDIRECT,
+    client_id: clientId, redirect_uri: REDIRECT,
     response_type: 'code', scope: SCOPES, state: s,
   })}`;
 }
