@@ -13,9 +13,9 @@ const SITE_NAME       = 'Zenith - Roblox Studio AI';
 // ── Model registry ───────────────────────────
 /** Primary model and ordered fallback chain. */
 const FALLBACK_CHAIN = [
-  'qwen/qwen3-coder:free',
-  'deepseek/deepseek-r1:free',
-  'google/gemma-3-27b-it:free',
+  'poolside/laguna-s-2.1:free',
+  'google/gemma-4-31b-it:free',
+  'openai/gpt-oss-20b:free',
 ];
 
 const DEFAULT_MODEL = FALLBACK_CHAIN[0];
