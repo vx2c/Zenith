@@ -2,19 +2,19 @@
 //  ZENITH — Dashboard
 // ═══════════════════════════════════════════
 
-const OAUTH_URL   = 'https://apis.roblox.com/oauth/v1/authorize';
-const CLIENT_ID   = '8019894370613982106';
-const REDIRECT    = window.location.origin + '/roblox-callback';
-const SCOPES      = 'openid profile';
+const OAUTH_URL = 'https://apis.roblox.com/oauth/v1/authorize';
+const CLIENT_ID = '8019894370613982106';
+const REDIRECT  = window.location.origin + '/roblox-callback';
+const SCOPES    = 'openid profile';
 
 const state = {
-  chatId:         null,
-  collapsed:      false,
-  actOpen:        false,
-  activities:     null,
-  delId:          null,
-  renId:          null,
-  responding:     false,
+  chatId:     null,
+  collapsed:  false,
+  actOpen:    false,
+  activities: null,
+  delId:      null,
+  renId:      null,
+  responding: false,
 };
 
 // ── Storage ──────────────────────────────────
@@ -27,6 +27,7 @@ function getUser() {
     displayName: localStorage.getItem('roblox_user_name') || '',
     username:    localStorage.getItem('roblox_username')  || '',
     userId:      localStorage.getItem('roblox_user_id')   || '',
+    avatarUrl:   localStorage.getItem('roblox_avatar')    || '',
   };
 }
 
@@ -56,7 +57,7 @@ function openLogin() {
   })}`;
 }
 function logout() {
-  ['roblox_user_name','roblox_username','roblox_user_id','roblox_oauth_state'].forEach(k => localStorage.removeItem(k));
+  ['roblox_user_name','roblox_username','roblox_user_id','roblox_avatar','roblox_oauth_state'].forEach(k => localStorage.removeItem(k));
   show('landing');
 }
 
@@ -83,20 +84,35 @@ function renderUser() {
 }
 
 async function loadAvatar() {
-  const { userId } = getUser();
-  if (!userId) return;
   const img = el('user-avatar');
   const fb  = el('user-avatar-fallback');
+  const { userId, avatarUrl } = getUser();
+
+  function setImg(url) {
+    if (!url) return;
+    img.src    = url;
+    img.onload  = () => { img.style.display = 'block'; fb.style.display = 'none'; };
+    img.onerror = () => { img.style.display = 'none';  fb.style.display = '';     };
+  }
+
+  // Use avatar URL stored at login (from OAuth userinfo) if available
+  if (avatarUrl) {
+    setImg(avatarUrl);
+    return;
+  }
+
+  // Fallback: fetch via our server-side proxy (avoids CORS)
+  if (!userId) return;
   try {
-    const r    = await fetch(`https://thumbnails.roblox.com/v1/users/avatar-headshot?userIds=${userId}&size=150x150&format=Png`);
-    const data = await r.json();
-    const url  = data?.data?.[0]?.imageUrl;
-    if (url) {
-      img.src    = url;
-      img.onload = () => { img.style.display = 'block'; fb.style.display = 'none'; };
-      img.onerror = () => {};
+    const r = await fetch(`/api/avatar?userId=${encodeURIComponent(userId)}`);
+    if (r.ok) {
+      const data = await r.json();
+      if (data.imageUrl) {
+        localStorage.setItem('roblox_avatar', data.imageUrl);
+        setImg(data.imageUrl);
+      }
     }
-  } catch {}
+  } catch { /* non-fatal */ }
 }
 
 // ── Chat CRUD ─────────────────────────────────
@@ -130,7 +146,7 @@ function renderMessages(msgs) {
   Array.from(box.children).forEach(ch => { if (ch !== emp) ch.remove(); });
   if (!msgs.length) { emp.classList.remove('hidden'); return; }
   emp.classList.add('hidden');
-  msgs.forEach(m => box.appendChild(m.role === 'user' ? userBubble(m.content) : aiMsg(m.content)));
+  msgs.forEach(m => box.appendChild(m.role === 'user' ? userBubble(m.content) : aiMsgDone(m.content)));
   box.scrollTop = box.scrollHeight;
 }
 
@@ -144,7 +160,14 @@ function userBubble(text) {
   return w;
 }
 
-function aiMsg(text, live = false) {
+// Finished AI message (markdown rendered)
+function aiMsgDone(text) {
+  const { wrap, textEl } = aiMsg(text, false);
+  textEl.innerHTML = md(text);
+  return wrap;
+}
+
+function aiMsg(text, live) {
   const w   = document.createElement('div');
   w.className = 'msg msg-ai';
   const av  = document.createElement('div');
@@ -157,15 +180,15 @@ function aiMsg(text, live = false) {
   nm.textContent = 'Zenith';
   const tx  = document.createElement('div');
   tx.className = 'ai-text';
-  if (!live) tx.innerHTML = md(text);
+  if (!live && text) tx.innerHTML = md(text);
   cd.appendChild(nm);
   cd.appendChild(tx);
   w.appendChild(av);
   w.appendChild(cd);
-  return live ? { wrap: w, textEl: tx } : w;
+  return { wrap: w, textEl: tx };
 }
 
-// ── Send ──────────────────────────────────────
+// ── Send with real Gemini ─────────────────────
 async function sendMsg(content) {
   content = content.trim();
   if (!content || state.responding) return;
@@ -175,6 +198,10 @@ async function sendMsg(content) {
   const chat = cs.find(c => c.id === state.chatId);
   if (!chat) { state.responding = false; return; }
 
+  // Capture history BEFORE adding new user message
+  const history = chat.messages.map(m => ({ role: m.role, content: m.content }));
+
+  // Push user message to history
   chat.messages.push({ role: 'user', content, ts: Date.now() });
   if (chat.title === 'New Chat')
     chat.title = content.slice(0, 40) + (content.length > 40 ? '…' : '');
@@ -187,49 +214,75 @@ async function sendMsg(content) {
   box.scrollTop = box.scrollHeight;
   renderSidebar();
 
-  // Activity
-  const acts = [
+  // Show activity
+  startActivity([
     { phase: 'Thinking', items: ['Analyzing your request…'] },
-    { phase: 'Working',  items: ['Processing context…'] },
-    { phase: 'Actions',  items: ['Generating response…', 'Formatting output…'] },
-    { phase: 'Finished', items: ['Response ready.'] },
-  ];
-  startActivity(acts);
+    { phase: 'Working',  items: ['Generating response…'] },
+  ]);
 
-  await wait(1800 + Math.random() * 900);
-
-  const reply = mockReply(content);
-
-  // Save AI message
-  const cs2   = getChats();
-  const chat2 = cs2.find(c => c.id === state.chatId);
-  if (chat2) { chat2.messages.push({ role: 'ai', content: reply, ts: Date.now() }); saveChats(cs2); }
-
-  stopActivity();
-
-  // Typewriter
-  const { wrap, textEl } = aiMsg(reply, true);
+  // Live AI bubble
+  const { wrap, textEl } = aiMsg('', true);
   box.appendChild(wrap);
   box.scrollTop = box.scrollHeight;
-  await typewrite(textEl, reply);
-  box.scrollTop = box.scrollHeight;
 
-  state.responding = false;
-}
+  let fullText = '';
 
-// ── Typewriter ────────────────────────────────
-async function typewrite(el, text) {
-  const paras = text.split(/\n\n+/).filter(Boolean);
-  el.innerHTML = '';
-  for (let i = 0; i < paras.length; i++) {
-    const p = document.createElement('p');
-    p.className = 'phrase';
-    p.innerHTML = mdInline(paras[i]);
-    el.appendChild(p);
-    await wait(10);
-    p.classList.add('visible');
-    await wait(Math.min(350 + paras[i].length * 5, 1100));
+  try {
+    const allMsgs = [...history, { role: 'user', content }];
+    const response = await fetch('/api/chat', {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ messages: allMsgs }),
+    });
+
+    if (!response.ok) throw new Error('HTTP ' + response.status);
+
+    const reader  = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop() || '';
+
+      for (const line of lines) {
+        if (!line.startsWith('data: ')) continue;
+        const raw = line.slice(6).trim();
+        if (!raw) continue;
+        try {
+          const parsed = JSON.parse(raw);
+          if (parsed.content) {
+            fullText += parsed.content;
+            textEl.innerHTML = md(fullText);
+            box.scrollTop = box.scrollHeight;
+          }
+          if (parsed.error) {
+            fullText = parsed.error;
+            textEl.innerHTML = md(fullText);
+          }
+        } catch { /* skip malformed SSE */ }
+      }
+    }
+  } catch (err) {
+    fullText = 'I had trouble connecting to the AI service. Please check your internet connection and try again.';
+    textEl.innerHTML = md(fullText);
   }
+
+  // Save AI reply
+  const cs2   = getChats();
+  const chat2 = cs2.find(c => c.id === state.chatId);
+  if (chat2 && fullText) {
+    chat2.messages.push({ role: 'ai', content: fullText, ts: Date.now() });
+    saveChats(cs2);
+  }
+
+  stopActivity();
+  state.responding = false;
+  box.scrollTop = box.scrollHeight;
 }
 
 // ── Activity ──────────────────────────────────
@@ -248,7 +301,7 @@ function startActivity(acts) {
     setTimeout(() => {
       if (state.actOpen) renderActBody(acts.slice(0, i + 1));
       if (i === acts.length - 1)
-        el('activity-summary').textContent = 'Zenith finished.';
+        el('activity-summary').textContent = 'Zenith is responding…';
     }, delay);
     delay += 600 + Math.random() * 300;
   });
@@ -352,6 +405,17 @@ function toggleSidebar() {
     : '<polyline points="15 18 9 12 15 6"/>';
 }
 
+// ── Copy server URL ───────────────────────────
+function copyServerUrl() {
+  const url = window.location.origin;
+  navigator.clipboard.writeText(url).then(() => {
+    const btn = el('btn-copy-url');
+    if (!btn) return;
+    btn.querySelector('span').textContent = 'Copied!';
+    setTimeout(() => { btn.querySelector('span').textContent = 'Copy server URL'; }, 2000);
+  }).catch(() => {});
+}
+
 // ── Wire events ───────────────────────────────
 function wire() {
   el('btn-login').addEventListener('click', openLogin);
@@ -405,55 +469,9 @@ function doSend() {
   const inp = el('chat-input');
   const v   = inp.value.trim();
   if (!v) return;
-  inp.value          = '';
-  inp.style.height   = 'auto';
+  inp.value        = '';
+  inp.style.height = 'auto';
   sendMsg(v);
-}
-
-// ── Mock AI ───────────────────────────────────
-const MOCK = {
-  greeting: `I'm Zenith, your Roblox Studio AI companion. I can help you write Lua scripts, debug errors, design game systems, and more.
-
-Could you give me more detail about what you'd like to build? The more context you provide, the better I can help.`,
-  script: `Here's how you'd approach this in Roblox Studio:
-
-For **client-side** logic, place a \`LocalScript\` inside \`StarterPlayerScripts\`. For **server-side** logic, use a \`Script\` inside \`ServerScriptService\`.
-
-A basic structure looks like this:
-
-\`\`\`lua
-local Players = game:GetService("Players")
-local player = Players.LocalPlayer
-\`\`\`
-
-Would you like me to write the full implementation for your use case?`,
-  remote: `The **client-server boundary** is critical in Roblox. Always validate actions on the server — never trust the client.
-
-Use \`RemoteEvents\` for fire-and-forget communication, or \`RemoteFunctions\` when you need a response back.
-
-Example:
-
-\`\`\`lua
--- Server
-RemoteEvent.OnServerEvent:Connect(function(player, data)
-  -- validate and process
-end)
-\`\`\`
-
-Want me to set up the full structure for your game?`,
-  general: `Great question! Here's how I'd approach this in Roblox Studio:
-
-Break the problem into smaller pieces — identify what should happen on the **server** vs. the **client**. Then use the appropriate services like \`TweenService\`, \`RunService\`, or \`DataStoreService\`.
-
-Share more details about what you're building and I'll write the specific code for you.`,
-};
-
-function mockReply(msg) {
-  const l = msg.toLowerCase();
-  if (/hola|hello|hi|hey|greet/.test(l)) return MOCK.greeting;
-  if (/script|lua|code|write|function|local/.test(l)) return MOCK.script;
-  if (/remote|event|server|client|network|signal/.test(l)) return MOCK.remote;
-  return MOCK.general;
 }
 
 // ── Utils ─────────────────────────────────────
@@ -462,10 +480,24 @@ function wait(n) { return new Promise(r => setTimeout(r, n)); }
 function esc(s)  { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
 
 function md(text) {
-  return text.split(/\n\n+/).map(para =>
-    '<p>' + mdInline(para) + '</p>'
-  ).join('');
+  if (!text) return '';
+  // Fenced code blocks
+  text = text.replace(/```(\w*)\n?([\s\S]*?)```/g, (_, lang, code) =>
+    `<pre><code class="lang-${lang || 'lua'}">${esc(code.trim())}</code></pre>`
+  );
+  // Inline code
+  text = text.replace(/`([^`\n]+)`/g, (_, c) => `<code>${esc(c)}</code>`);
+  // Paragraphs
+  return text.split(/\n\n+/).map(para => {
+    para = para
+      .replace(/&(?!amp;|lt;|gt;|quot;)/g, '&amp;')
+      .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+      .replace(/\*(.*?)\*/g, '<em>$1</em>')
+      .replace(/\n/g, '<br/>');
+    return `<p>${para}</p>`;
+  }).join('');
 }
+
 function mdInline(t) {
   return t
     .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
