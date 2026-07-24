@@ -24,10 +24,12 @@ module.exports = async function handler(req, res) {
   try { body = await parseJsonBody(req); }
   catch { return res.status(400).json({ error: 'Invalid JSON body' }); }
 
-  const { code, redirect_uri } = body || {};
+  const { code, redirect_uri, client_id: bodyClientId } = body || {};
   if (!code || !redirect_uri) return res.status(400).json({ error: 'Missing required OAuth parameters' });
 
-  const clientId     = process.env.ROBLOX_CLIENT_ID;
+  // Prefer the client_id the frontend actually used to start OAuth (prevents invalid_grant
+  // when the env var differs from the hardcoded id in the frontend JS).
+  const clientId     = bodyClientId || process.env.ROBLOX_CLIENT_ID;
   const clientSecret = process.env.ROBLOX_CLIENT_SECRET;
   if (!clientId || !clientSecret)
     return res.status(500).json({ error: 'Server misconfigured: missing Roblox credentials' });

@@ -19,6 +19,7 @@ const state = {
   modeThinking: false,
   modeSearch:   false,
   activePanel:  'home',
+  pluginToken:  null,   // signed session token from active Studio plugin
 };
 
 // ── Storage ──────────────────────────────────
@@ -174,6 +175,7 @@ function initApp() {
   renderUser();
   loadAvatar();
   loadAIStatus();
+  loadPluginStatus();
   const chats = getChats();
   if (!chats.length) { newChat(); return; }
   const lastId = localStorage.getItem('z_active');
@@ -485,10 +487,15 @@ async function sendMsg(content) {
 
     const allMsgs = [...history, { role: 'user', content }];
 
+    console.log("CHAT SESSION:", state.pluginToken);
     const response = await fetch('/api/chat', {
       method:  'POST',
       headers: { 'Content-Type': 'application/json' },
-      body:    JSON.stringify({ messages: allMsgs, systemNote: systemNote.join(' ') }),
+      body:    JSON.stringify({
+        messages:   allMsgs,
+        systemNote: systemNote.join(' '),
+        sessionId:  state.pluginToken || undefined,
+      }),
       signal:  state.abortCtrl.signal,
     });
 
@@ -727,6 +734,43 @@ async function loadAIStatus() {
   }
 
   setTimeout(loadAIStatus, 60_000);
+}
+
+// ── Plugin / Studio Status ────────────────────
+async function loadPluginStatus() {
+  try {
+    const r = await fetch('/api/plugin-status');
+    if (!r.ok) throw new Error('status ' + r.status);
+    const data = await r.json();
+
+    const session   = data.sessions?.[0] ?? null;
+    // Use the signed token — self-verifiable on any Vercel instance (no shared memory needed)
+    state.pluginToken = session?.token ?? session?.sessionId ?? null;
+    console.log("PLUGIN SESSION:", session);
+
+    const dot   = el('studio-dot');
+    const label = el('studio-label');
+    const meta  = el('studio-meta');
+    if (!dot) return;
+
+    if (data.connected && session) {
+      dot.className     = 'ai-status-dot online';
+      label.textContent = 'Studio';
+      if (meta) {
+        const parts = [];
+        if (session.placeName) parts.push(session.placeName);
+        else if (session.placeId) parts.push('Place ' + session.placeId);
+        meta.textContent = parts.join(' · ') || 'Connected';
+      }
+    } else {
+      state.pluginToken = null;
+      dot.className     = 'ai-status-dot offline';
+      label.textContent = 'No Studio';
+      if (meta) meta.textContent = '';
+    }
+  } catch { /* non-fatal */ }
+
+  setTimeout(loadPluginStatus, 4_000);
 }
 
 function setRespondingModel(modelId) {
