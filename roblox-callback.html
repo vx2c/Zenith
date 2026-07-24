@@ -70,13 +70,15 @@
           });
 
           if (!res.ok) {
-            return fail('Could not complete Roblox login. Please try again.');
+            const errData = await res.json().catch(() => ({}));
+            return fail(errData.details || errData.error || 'Could not complete Roblox login. Please try again.');
           }
 
           const data = await res.json();
           if (data.displayName) localStorage.setItem('roblox_user_name', data.displayName);
           if (data.username)    localStorage.setItem('roblox_username',   data.username);
           if (data.userId)      localStorage.setItem('roblox_user_id',    data.userId);
+          if (data.picture)     localStorage.setItem('roblox_avatar',     data.picture);
 
           window.location.href = '/';
         } catch (e) {
