@@ -3,7 +3,7 @@
 // ═══════════════════════════════════════════
 
 const OAUTH_URL = 'https://apis.roblox.com/oauth/v1/authorize';
-const CLIENT_ID = '8019894370613982106';
+const CLIENT_ID = '5954617612200319484';
 const REDIRECT  = window.location.origin + '/roblox-callback';
 const SCOPES    = 'openid profile';
 
