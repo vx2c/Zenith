@@ -1,0 +1,1 @@
+- [Deployment boundary](deployment-boundary.md) — Vercel production uses the root frontend and `api/` functions, separate from the Replit artifact apps.

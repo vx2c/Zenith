@@ -1,0 +1,60 @@
+Veo el problema exactamente. El AI está mostrando el TOOL: como texto pero no lo ejecuta — eso significa que el chat está yendo por plainStream (sin sesión del plugin). Necesito ver cómo script.js maneja el plugin token.
+
+
+6 actions
+Voy a leer el resto de archivos para entender el flujo completo.
+
+
+3 actions
+Veo exactamente el problema. El AI está mostrando el TOOL: como texto porque el sessionId era null — el chat usó plainStream sin herramientas. Además el agentLoop siempre muestra "✅ Listo." aunque el comando falle. Voy a arreglar ambos ahora.
+
+
+3 actions
+Ahora hago todos los arreglos de una vez:
+
+
+2 actions
+Haciendo los 2 fixes críticos en chat.js en paralelo:
+
+
+2 actions
+Now fixing the plain stream system prompt so the AI never outputs TOOL: lines when Studio isn't connected:
+
+
+4 actions
+Los cambios están en GitHub y Vercel desplegando. Aquí tienes todo lo que necesitas saber para entender y editar esto tú mismo.
+
+¿Por qué el AI mostraba el TOOL: como texto?
+El chat tiene 2 modos:
+
+Con plugin conectado → agentLoop → detecta TOOL:, lo ejecuta en Studio
+Sin plugin → plainStream → solo texto, sin ejecución
+El TOOL: que viste como texto = el plugin no estaba conectado cuando enviaste el mensaje. El AI lo hacía de memoria aunque no tenía herramientas disponibles.
+
+Qué se arregló hoy
+#	Problema	Fix
+1	Vercel cortaba la función a los 10s	maxDuration: 60 en vercel.json
+2	Sesión expiraba en 12 segundos	SESSION_TTL: 12 → 300 en session-store.js
+3	Respuesta vacía no reintentaba modelo	plainStream ahora salta al siguiente modelo
+4	Siempre mostraba "✅ Listo" aunque fallara	Ahora muestra ❌ Error: ... si Studio no responde
+5	AI inventaba TOOL: sin plugin	Prompt actualizado: "NO outputes TOOL:{}, no tienes herramientas"
+Archivos exactos que puedes editar tú mismo
+api/chat.js          ← PRINCIPAL. Aquí está toda la lógica del AI:
+                       - buildSystemPrompt()  → instrucciones al AI
+                       - agentLoop()          → detecta TOOL: y lo ejecuta
+                       - plainStream()        → chat sin Studio
+                       - extractToolCall()    → parsea el JSON del TOOL:
+                       - executeStudioTool()  → manda comando al plugin
+api/aiService.js     ← MODELOS. Cambia FALLBACK_CHAIN para probar otros modelos
+api/session-store.js ← REDIS. SESSION_TTL, cómo se guardan las sesiones
+api/connect.js       ← Se llama cuando el plugin hace click en Connect
+api/heartbeat.js     ← Se llama cada 2s desde el plugin; entrega comandos
+api/command_result.js← Recibe el resultado del plugin después de ejecutar
+api/plugin-status.js ← El dashboard pregunta aquí si hay Studio conectado
+script.js            ← Frontend de producción (lo que ves en xzenith.vercel.app)
+vercel.json          ← Configuración de Vercel (timeouts, rutas)
+
+Para que funcione correctamente ahora
+Abre Studio → plugin AI Connector → clic Connect
+El indicador en xzenith.vercel.app debe mostrar "Studio" (punto verde)
+Escribe tu mensaje — ahora el AI ejecutará los comandos de verdad
