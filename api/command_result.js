@@ -25,7 +25,7 @@ module.exports = async function handler(req, res) {
   try { body = await parseJsonBody(req); } catch { /* ignore */ }
 
   const { id, result, error } = body || {};
-  if (id) storeResult(id, result, error ?? null);
+  if (id) await storeResult(id, result, error || null);
 
   return res.status(200).json({ status: 'ok' });
 };

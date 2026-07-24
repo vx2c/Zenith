@@ -27,12 +27,12 @@ module.exports = async function handler(req, res) {
   const { sessionId } = body || {};
 
   if (sessionId) {
-    const found = touchSession(sessionId);
+    const found = await touchSession(sessionId);
     if (!found) {
       // Session expired — tell plugin to reconnect
       return res.status(200).json({ status: 'ok', commands: [], reconnect: true });
     }
-    const commands = dequeueCommands(sessionId);
+    const commands = await dequeueCommands(sessionId);
     return res.status(200).json({ status: 'ok', commands });
   }
 

@@ -1,166 +1,164 @@
 'use strict';
-
 /**
- * Session store for Roblox Studio plugin connections.
+ * Session store backed by Upstash Redis (REST API).
  *
- * ## Vercel stateless problem & solution
- * Vercel serverless functions are stateless — each invocation may run on a
- * different instance, so pure in-memory maps drop sessions on cold starts.
+ * Required env vars (set in Vercel project settings):
+ *   UPSTASH_REDIS_REST_URL   — e.g. https://xxxx.upstash.io
+ *   UPSTASH_REDIS_REST_TOKEN — your Upstash REST token
  *
- * Solution: `createSession` returns a SIGNED TOKEN (HMAC-SHA256 over
- * SESSION_SECRET) that encodes all session data.  Any Vercel instance can
- * verify the token without shared state, so the plugin never gets an
- * unexpected "session not found" disconnect.
- *
- * Command queues are still kept in memory (best-effort).  On a cold start
- * the queue is empty, but the plugin stays connected — commands queued
- * before the cold start are simply not delivered (acceptable trade-off
- * without an external KV store).
+ * Why Redis and not in-memory?
+ * Vercel serverless functions are stateless. Each endpoint (/connect,
+ * /heartbeat, /plugin-status) may run on a different instance, so an
+ * in-memory Map is never shared between them. Redis is the fix.
  */
 
-const crypto = require('crypto');
+const REDIS_URL   = process.env.UPSTASH_REDIS_REST_URL;
+const REDIS_TOKEN = process.env.UPSTASH_REDIS_REST_TOKEN;
 
-// ── Secret ────────────────────────────────────
-const SECRET = process.env.SESSION_SECRET || 'zenith-fallback-secret';
+// How long (seconds) a session lives after its last heartbeat.
+const SESSION_TTL = 12;
 
-// ── In-memory store (best-effort on Vercel, reliable on single-instance) ──
-const sessions     = new Map(); // Map<sessionId, SessionData>
-const commandQueues  = new Map(); // Map<sessionId, Array<{id,type,args}>>
-const commandResults = new Map(); // Map<commandId, {result,error,receivedAt}>
-
-const SESSION_TTL_MS = 30_000; // 30 s — more forgiving for cold starts
-
-// ─────────────────────────────────────────────
-//  Signed-token helpers (stateless across instances)
-// ─────────────────────────────────────────────
-
-function _sign(payload) {
-  const data = Buffer.from(JSON.stringify(payload)).toString('base64url');
-  const sig  = crypto.createHmac('sha256', SECRET).update(data).digest('base64url');
-  return `${data}.${sig}`;
+/**
+ * Execute one Redis command via the Upstash REST API.
+ * @param {...string|number} args — e.g. ('SET', 'key', 'value', 'EX', 10)
+ */
+async function redisCmd(...args) {
+  if (!REDIS_URL || !REDIS_TOKEN) {
+    // Graceful degradation: warn and return null so the app doesn't crash.
+    console.error(
+      '[session-store] Upstash Redis not configured. ' +
+      'Set UPSTASH_REDIS_REST_URL and UPSTASH_REDIS_REST_TOKEN in Vercel.'
+    );
+    return null;
+  }
+  const res = await fetch(REDIS_URL, {
+    method:  'POST',
+    headers: {
+      Authorization:  `Bearer ${REDIS_TOKEN}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(args),
+  });
+  const json = await res.json();
+  return json.result ?? null;
 }
-
-/** Returns the decoded payload or null if the token is invalid / tampered. */
-function _verify(token) {
-  if (!token || typeof token !== 'string') return null;
-  const dot  = token.lastIndexOf('.');
-  if (dot < 0) return null;
-  const data = token.slice(0, dot);
-  const sig  = token.slice(dot + 1);
-  const expected = crypto.createHmac('sha256', SECRET).update(data).digest('base64url');
-  if (sig !== expected) return null;
-  try { return JSON.parse(Buffer.from(data, 'base64url').toString()); } catch { return null; }
-}
-
-function _resolveSessionId(tokenOrId) {
-  const p = _verify(tokenOrId);
-  return p ? p.sessionId : tokenOrId; // fall back to treating it as a plain ID
-}
-
-// ─────────────────────────────────────────────
-//  Public API
-// ─────────────────────────────────────────────
 
 function generateId() {
   return Math.random().toString(36).slice(2) + Date.now().toString(36);
 }
 
+// ── Public API ─────────────────────────────────────────────────────────────
+
 /**
- * Create a new plugin session.
- * Returns a SIGNED TOKEN that encodes all session data.
- * Vercel: any instance can verify it without shared state.
+ * Create a new plugin session. Returns the sessionId.
  */
-function createSession(info = {}) {
+async function createSession({ placeId, username, placeName } = {}) {
   const sessionId = generateId();
-  const payload = {
+  const now = Date.now();
+  const session = {
     sessionId,
-    placeId:     info.placeId   || null,
-    username:    info.username  || null,
-    placeName:   info.placeName || null,
-    connectedAt: Date.now(),
+    placeId:    placeId    || null,
+    username:   username   || null,
+    placeName:  placeName  || null,
+    connectedAt: now,
+    lastSeen:    now,
   };
-  const token = _sign(payload);
-  // Mirror into local memory so getActiveSessions() works on this instance
-  sessions.set(sessionId, { ...payload, lastSeen: Date.now(), token });
-  commandQueues.set(sessionId, []);
-  return token; // signed token IS the sessionId returned to the plugin
+  await redisCmd('SET', `session:${sessionId}`, JSON.stringify(session), 'EX', SESSION_TTL);
+  return sessionId;
 }
 
 /**
- * Touch the session on heartbeat.
- * Accepts either a signed token OR a plain sessionId (legacy plugins).
- * On a cold Vercel instance the token is re-hydrated from its payload.
+ * Update last-seen timestamp (called on each heartbeat).
+ * Returns false if the session doesn't exist (expired).
  */
-function touchSession(tokenOrId) {
-  // Try stateless token first
-  const payload = _verify(tokenOrId);
-  if (payload) {
-    const { sessionId } = payload;
-    if (!sessions.has(sessionId)) {
-      // Cold start: re-hydrate session from the signed token
-      sessions.set(sessionId, { ...payload, lastSeen: Date.now(), token: tokenOrId });
-      commandQueues.set(sessionId, []);
-    } else {
-      sessions.get(sessionId).lastSeen = Date.now();
-    }
-    return true;
-  }
-  // Fallback: plain sessionId (old plugins without token support)
-  const s = sessions.get(tokenOrId);
-  if (s) { s.lastSeen = Date.now(); return true; }
-  return false;
+async function touchSession(sessionId) {
+  const raw = await redisCmd('GET', `session:${sessionId}`);
+  if (!raw) return false;
+  const session = JSON.parse(raw);
+  session.lastSeen = Date.now();
+  await redisCmd('SET', `session:${sessionId}`, JSON.stringify(session), 'EX', SESSION_TTL);
+  return true;
 }
 
-/** Enqueue a command for the plugin to execute on next heartbeat. */
-function enqueueCommand(tokenOrId, type, args = {}) {
-  const sid   = _resolveSessionId(tokenOrId);
-  if (!commandQueues.has(sid)) commandQueues.set(sid, []);
-  const id = generateId();
-  commandQueues.get(sid).push({ id, type, args });
+/**
+ * Return all currently-active sessions.
+ */
+async function getActiveSessions() {
+  const keys = await redisCmd('KEYS', 'session:*');
+  if (!keys || !keys.length) return [];
+  // Fetch all sessions in one pipeline call
+  const pipeline = keys.map(k => ['GET', k]);
+  const res = await fetch(`${REDIS_URL}/pipeline`, {
+    method:  'POST',
+    headers: {
+      Authorization:  `Bearer ${REDIS_TOKEN}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(pipeline),
+  });
+  const results = await res.json();
+  return results
+    .map(r => r.result)
+    .filter(Boolean)
+    .map(v => JSON.parse(v));
+}
+
+/**
+ * Queue a command for the plugin to execute on its next heartbeat.
+ * Returns the commandId, or null if the session doesn't exist.
+ */
+async function enqueueCommand(sessionId, type, args = {}) {
+  const exists = await redisCmd('EXISTS', `session:${sessionId}`);
+  if (!exists) return null;
+  const id  = generateId();
+  const cmd = JSON.stringify({ id, type, args });
+  await redisCmd('RPUSH', `cmds:${sessionId}`, cmd);
+  await redisCmd('EXPIRE', `cmds:${sessionId}`, 60);
   return id;
 }
 
-/** Dequeue all pending commands for a session (consumed on heartbeat). */
-function dequeueCommands(tokenOrId) {
-  const sid   = _resolveSessionId(tokenOrId);
-  const queue = commandQueues.get(sid) || [];
-  commandQueues.set(sid, []);
-  return queue;
+/**
+ * Drain all pending commands for a session (called on heartbeat).
+ */
+async function dequeueCommands(sessionId) {
+  const len = await redisCmd('LLEN', `cmds:${sessionId}`);
+  if (!len) return [];
+  const cmds = await redisCmd('LRANGE', `cmds:${sessionId}`, 0, -1);
+  await redisCmd('DEL', `cmds:${sessionId}`);
+  return (cmds || []).map(c => JSON.parse(c));
 }
 
-/** Store a command result from the plugin. */
-function storeResult(commandId, result, error) {
-  commandResults.set(commandId, { result, error, receivedAt: Date.now() });
-  setTimeout(() => commandResults.delete(commandId), 60_000);
+/**
+ * Store the result of a command returned by the plugin.
+ */
+async function storeResult(commandId, result, error) {
+  const data = JSON.stringify({ result, error: error || null, receivedAt: Date.now() });
+  await redisCmd('SET', `result:${commandId}`, data, 'EX', 60);
 }
 
-/** Get all active sessions (heartbeat within TTL). */
-function getActiveSessions() {
-  const now = Date.now();
-  const active = [];
-  for (const [, s] of sessions) {
-    if (now - s.lastSeen <= SESSION_TTL_MS) {
-      active.push(s);
-    } else {
-      sessions.delete(s.sessionId);
-      commandQueues.delete(s.sessionId);
-    }
-  }
-  return active;
+/**
+ * Retrieve a stored command result.
+ */
+async function getResult(commandId) {
+  const raw = await redisCmd('GET', `result:${commandId}`);
+  return raw ? JSON.parse(raw) : null;
 }
 
-/** Get a single session by token or ID. */
-function getSession(tokenOrId) {
-  const sid = _resolveSessionId(tokenOrId);
-  return sessions.get(sid) || null;
+/**
+ * Get a single session by ID.
+ */
+async function getSession(sessionId) {
+  const raw = await redisCmd('GET', `session:${sessionId}`);
+  return raw ? JSON.parse(raw) : null;
 }
 
 module.exports = {
   createSession,
   touchSession,
+  getActiveSessions,
   enqueueCommand,
   dequeueCommands,
   storeResult,
-  getActiveSessions,
+  getResult,
   getSession,
 };

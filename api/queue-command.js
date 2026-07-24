@@ -32,12 +32,12 @@ module.exports = async function handler(req, res) {
 
   let targetSession = sessionId;
   if (!targetSession) {
-    const active = getActiveSessions();
+    const active = await getActiveSessions();
     if (!active.length) return res.status(404).json({ error: 'No plugin connected' });
     targetSession = active[0].sessionId;
   }
 
-  const commandId = enqueueCommand(targetSession, type, args || {});
+  const commandId = await enqueueCommand(targetSession, type, args || {});
   if (!commandId) return res.status(404).json({ error: 'Session not found' });
 
   return res.status(200).json({ status: 'ok', commandId, sessionId: targetSession });

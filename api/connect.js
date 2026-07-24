@@ -25,7 +25,7 @@ module.exports = async function handler(req, res) {
   try { body = await parseJsonBody(req); } catch { /* ignore */ }
 
   const { placeId, username, placeName } = body || {};
-  const sessionId = createSession({ placeId, username, placeName });
+  const sessionId = await createSession({ placeId, username, placeName });
 
   return res.status(200).json({
     status:    'ok',

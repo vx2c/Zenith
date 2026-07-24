@@ -15,31 +15,16 @@ function parseJsonBody(req) {
 }
 
 /** Build plugin context string injected into the AI system prompt. */
-function buildPluginContext(sessionId) {
-    if (!sessionId) return null;
-
-    const s = getSession(sessionId);
-
-    if (!s) return null;
-
-    const parts = [
-        'A Roblox Studio plugin is currently connected to Zenith.'
-    ];
-
-    if (s.placeId)
-        parts.push(`Place ID: ${s.placeId}.`);
-
-    if (s.username)
-        parts.push(`Developer (Creator ID): ${s.username}.`);
-
-    if (s.placeName)
-        parts.push(`Place Name: ${s.placeName}.`);
-
-    parts.push(
-        'The developer can read/write scripts and query the Explorer tree through the plugin.'
-    );
-
-    return parts.join(' ');
+async function buildPluginContext(sessionId) {
+  if (!sessionId) return null;
+  const s = await getSession(sessionId);
+  if (!s) return null;
+  const parts = ['A Roblox Studio plugin is currently connected to Zenith.'];
+  if (s.placeId)   parts.push(`Place ID: ${s.placeId}.`);
+  if (s.username)  parts.push(`Developer (Creator ID): ${s.username}.`);
+  if (s.placeName) parts.push(`Place Name: ${s.placeName}.`);
+  parts.push('The developer can read/write scripts and query the Explorer tree through the plugin.');
+  return parts.join(' ');
 }
 
 module.exports = async function handler(req, res) {
@@ -53,19 +38,13 @@ module.exports = async function handler(req, res) {
   try { body = await parseJsonBody(req); }
   catch { return res.status(400).json({ error: 'Invalid JSON' }); }
 
-  const {
-    messages = [],
-    model,
-    sessionId
-} = body;
+  const { messages = [], model, sessionId } = body;
+  const pluginContext = await buildPluginContext(sessionId);
 
-console.log("SESSION:", sessionId);
-const pluginContext =
-    buildPluginContext(sessionId);
-  res.setHeader('Content-Type',       'text/event-stream');
-  res.setHeader('Cache-Control',      'no-cache, no-transform');
-  res.setHeader('Connection',         'keep-alive');
-  res.setHeader('X-Accel-Buffering',  'no');
+  res.setHeader('Content-Type',      'text/event-stream');
+  res.setHeader('Cache-Control',     'no-cache, no-transform');
+  res.setHeader('Connection',        'keep-alive');
+  res.setHeader('X-Accel-Buffering', 'no');
   res.flushHeaders();
 
   await streamChat(messages, res, model, pluginContext);
