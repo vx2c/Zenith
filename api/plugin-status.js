@@ -16,6 +16,7 @@ module.exports = function handler(req, res) {
     connected,
     sessions: sessions.map(s => ({
       sessionId:   s.sessionId,
+      token:       s.token,        // signed token — self-verifiable on any Vercel instance
       placeId:     s.placeId,
       username:    s.username,
       placeName:   s.placeName,

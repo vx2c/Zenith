@@ -104,6 +104,7 @@ function mkTheme(isDark: boolean) {
 // ── Plugin Status hook ────────────────────────
 interface PluginSession {
   sessionId:   string;
+  token?:      string;   // signed token — self-verifiable on any Vercel instance
   placeId:     string | null;
   username:    string | null;
   placeName:   string | null;
@@ -652,7 +653,9 @@ function SettingsPanel({ isDark, lang, onSetTheme, onSetLang }:
 function AssistantPanel({ isDark, lang, pluginSession }: { isDark: boolean; lang: keyof typeof TRANSLATIONS; pluginSession: PluginSession | null }) {
   const T = TRANSLATIONS[lang];
   const th = mkTheme(isDark);
-  const sessionId = pluginSession?.sessionId ?? null;
+  // Use the signed token — self-verifiable on any Vercel instance without shared memory.
+  // Fall back to plain sessionId only for legacy plugins that don't return a token.
+  const sessionId = pluginSession?.token ?? pluginSession?.sessionId ?? null;
   console.log("ASSISTANT SESSION:", sessionId);
   const {
     messages, input, setInput, loading, error, activeModel,
