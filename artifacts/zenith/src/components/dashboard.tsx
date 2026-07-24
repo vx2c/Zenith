@@ -147,7 +147,7 @@ function useAIStatus() {
 }
 
 // ── Chat hook ─────────────────────────────────
-function useChat() {
+function useChat(sessionId?: string | null) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
@@ -201,10 +201,12 @@ function useChat() {
 
     let finalModel: string | null = null;
     try {
+      console.log("CHAT SESSION:", sessionId);
+      console.log("SESSION SENT:", sessionId);
       const res = await fetch(`${BASE}/api/chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ messages: messagesForApi }),
+        body: JSON.stringify({ messages: messagesForApi, sessionId: sessionId ?? undefined }),
         signal: abortRef.current.signal,
       });
       if (!res.ok) throw new Error(`Server error ${res.status}`);
@@ -648,14 +650,15 @@ function SettingsPanel({ isDark, lang, onSetTheme, onSetLang }:
 }
 
 // ── Assistant Panel ───────────────────────────
-function AssistantPanel({ isDark, lang }: { isDark: boolean; lang: keyof typeof TRANSLATIONS }) {
+function AssistantPanel({ isDark, lang, pluginSession }: { isDark: boolean; lang: keyof typeof TRANSLATIONS; pluginSession: PluginSession | null }) {
   const T = TRANSLATIONS[lang];
   const th = mkTheme(isDark);
+  const sessionId = pluginSession?.sessionId ?? null;
   const {
     messages, input, setInput, loading, error, activeModel,
     thinkingMode, setThinkingMode, searchMode, setSearchMode,
     send, stop, retry, toggleLike, thinkingState, THINKING_STATES,
-  } = useChat();
+  } = useChat(sessionId);
   const bottomRef = useRef<HTMLDivElement>(null);
   const [showPlus, setShowPlus] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -1096,7 +1099,7 @@ export default function Dashboard({ userName }: DashboardProps) {
           transition: 'all 0.3s cubic-bezier(0.4,0,0.2,1)',
         }}>
           {activeNav === 'home'      && <HomePanel userName={userName} isDark={isDark} lang={lang} />}
-          {activeNav === 'assistant' && <AssistantPanel isDark={isDark} lang={lang} />}
+          {activeNav === 'assistant' && <AssistantPanel isDark={isDark} lang={lang} pluginSession={pluginStatus?.sessions?.[0] ?? null} />}
           {activeNav === 'settings'  && (
             <SettingsPanel isDark={isDark} lang={lang} onSetTheme={setTheme} onSetLang={setLanguage} />
           )}
