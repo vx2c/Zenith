@@ -25,7 +25,9 @@ module.exports = async function handler(req, res) {
 
   const { messages = [] } = body;
   const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey) return res.status(500).json({ error: 'GEMINI_API_KEY not configured' });
+  if (!apiKey) {
+    return res.status(500).json({ error: 'GEMINI_API_KEY not configured on server' });
+  }
 
   // Build Gemini contents array
   const contents = [
@@ -38,10 +40,11 @@ module.exports = async function handler(req, res) {
   ];
 
   res.setHeader('Content-Type', 'text/event-stream');
-  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Cache-Control', 'no-cache, no-transform');
   res.setHeader('Connection', 'keep-alive');
   res.setHeader('X-Accel-Buffering', 'no');
-  res.setHeader('Transfer-Encoding', 'chunked');
+  // Flush headers immediately so Vercel starts streaming instead of buffering
+  res.flushHeaders();
 
   try {
     const streamUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:streamGenerateContent?alt=sse&key=${apiKey}`;
@@ -53,7 +56,7 @@ module.exports = async function handler(req, res) {
 
     if (!geminiRes.ok) {
       const errText = await geminiRes.text();
-      res.write(`data: ${JSON.stringify({ error: `Gemini error ${geminiRes.status}` })}\n\n`);
+      res.write(`data: ${JSON.stringify({ error: `Gemini API error ${geminiRes.status}: ${errText.slice(0, 200)}` })}\n\n`);
       res.end();
       return;
     }
@@ -82,7 +85,7 @@ module.exports = async function handler(req, res) {
       }
     }
   } catch (err) {
-    res.write(`data: ${JSON.stringify({ error: err.message })}\n\n`);
+    res.write(`data: ${JSON.stringify({ error: err.message || 'Unknown error contacting Gemini' })}\n\n`);
   }
 
   res.write(`data: ${JSON.stringify({ done: true })}\n\n`);
