@@ -4,6 +4,13 @@
   "buildCommand": "echo skip",
   "outputDirectory": ".",
   "framework": null,
+  "functions": {
+    "api/chat.js": { "maxDuration": 60 },
+    "api/connect.js": { "maxDuration": 10 },
+    "api/heartbeat.js": { "maxDuration": 10 },
+    "api/command_result.js": { "maxDuration": 10 },
+    "api/plugin-status.js": { "maxDuration": 10 }
+  },
   "headers": [
     {
       "source": "/api/(.*)",

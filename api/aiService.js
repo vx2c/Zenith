@@ -11,13 +11,15 @@ const SITE_URL        = process.env.SITE_URL || 'https://xzenith.vercel.app';
 const SITE_NAME       = 'Zenith - Roblox Studio AI';
 
 // ── Model registry ───────────────────────────
-// Updated 2025-07: previous models (qwen3-coder, deepseek-r1, gemma-3-27b)
-// are no longer available on OpenRouter free tier.
+// Verified 2025-07-24: these models exist and are free on OpenRouter.
+// Ordered by response speed (faster first) — critical for Vercel 60s limit.
 const FALLBACK_CHAIN = [
-  'google/gemma-4-31b-it:free',
-  'openai/gpt-oss-20b:free',
-  'cohere/north-mini-code:free',
-  'poolside/laguna-m.1:free',
+  'google/gemma-4-26b-a4b-it:free',   // MoE: only 4B active params → fastest
+  'openai/gpt-oss-20b:free',           // 20B, good quality + speed
+  'nvidia/nemotron-nano-9b-v2:free',   // 9B nano, very fast
+  'google/gemma-4-31b-it:free',        // 31B dense, quality fallback
+  'cohere/north-mini-code:free',       // code-specialist (great for Lua)
+  'poolside/laguna-m.1:free',          // code-specialist fallback
 ];
 
 const DEFAULT_MODEL = FALLBACK_CHAIN[0];

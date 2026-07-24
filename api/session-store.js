@@ -16,7 +16,8 @@ const REDIS_URL   = process.env.UPSTASH_REDIS_REST_URL;
 const REDIS_TOKEN = process.env.UPSTASH_REDIS_REST_TOKEN;
 
 // How long (seconds) a session lives after its last heartbeat.
-const SESSION_TTL = 12;
+// Plugin sends heartbeat every 2s; 300s = 5 minutes of missed heartbeats before expiry.
+const SESSION_TTL = 300;
 
 /**
  * Execute one Redis command via the Upstash REST API.

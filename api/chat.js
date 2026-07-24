@@ -135,43 +135,54 @@ async function streamWithCollection(messages, apiKey, model) {
   const chain = [model, ...FALLBACK_CHAIN.filter(m => m !== model)];
 
   for (const m of chain) {
-    const upRes = await fetch(OPENROUTER_BASE, {
-      method: 'POST',
-      headers: {
-        Authorization:  `Bearer ${apiKey}`,
-        'Content-Type': 'application/json',
-        'HTTP-Referer': 'https://xzenith.vercel.app',
-        'X-Title':      'Zenith - Roblox Studio AI',
-      },
-      body: JSON.stringify({ model: m, stream: true, max_tokens: 8192, messages }),
-    });
+    let upRes;
+    try {
+      upRes = await fetch(OPENROUTER_BASE, {
+        method: 'POST',
+        headers: {
+          Authorization:  `Bearer ${apiKey}`,
+          'Content-Type': 'application/json',
+          'HTTP-Referer': 'https://xzenith.vercel.app',
+          'X-Title':      'Zenith - Roblox Studio AI',
+        },
+        body: JSON.stringify({ model: m, stream: true, max_tokens: 4096, messages }),
+      });
+    } catch { continue; }
 
-    if (!upRes.ok) continue;
+    if (!upRes.ok) {
+      console.warn(`[chat/collect] model ${m} returned HTTP ${upRes.status} — trying next`);
+      continue;
+    }
 
     const reader  = upRes.body.getReader();
     const decoder = new TextDecoder();
     let buffer    = '';
     let full      = '';
 
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      buffer += decoder.decode(value, { stream: true });
-      const lines = buffer.split('\n');
-      buffer = lines.pop() ?? '';
-      for (const line of lines) {
-        if (!line.startsWith('data: ')) continue;
-        const raw = line.slice(6).trim();
-        if (!raw || raw === '[DONE]') continue;
-        try {
-          const chunk = JSON.parse(raw);
-          const text  = chunk.choices?.[0]?.delta?.content;
-          if (text) full += text;
-        } catch { /* skip */ }
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() ?? '';
+        for (const line of lines) {
+          if (!line.startsWith('data: ')) continue;
+          const raw = line.slice(6).trim();
+          if (!raw || raw === '[DONE]') continue;
+          try {
+            const chunk = JSON.parse(raw);
+            const text  = chunk.choices?.[0]?.delta?.content;
+            if (text) full += text;
+          } catch { /* skip */ }
+        }
       }
-    }
+    } catch { /* stream interrupted */ }
 
-    return { model: m, text: full };
+    if (full) return { model: m, text: full };
+
+    // Model returned OK but empty content — try next
+    console.warn(`[chat/collect] model ${m} returned empty — trying next`);
   }
   return null;
 }
@@ -191,48 +202,70 @@ async function plainStream(messages, apiKey, model, res) {
   const chain = [model, ...FALLBACK_CHAIN.filter(m => m !== model)];
 
   for (const m of chain) {
-    const upRes = await fetch(OPENROUTER_BASE, {
-      method: 'POST',
-      headers: {
-        Authorization:  `Bearer ${apiKey}`,
-        'Content-Type': 'application/json',
-        'HTTP-Referer': 'https://xzenith.vercel.app',
-        'X-Title':      'Zenith - Roblox Studio AI',
-      },
-      body: JSON.stringify({ model: m, stream: true, max_tokens: 8192, messages }),
-    });
+    let upRes;
+    try {
+      upRes = await fetch(OPENROUTER_BASE, {
+        method: 'POST',
+        headers: {
+          Authorization:  `Bearer ${apiKey}`,
+          'Content-Type': 'application/json',
+          'HTTP-Referer': 'https://xzenith.vercel.app',
+          'X-Title':      'Zenith - Roblox Studio AI',
+        },
+        body: JSON.stringify({ model: m, stream: true, max_tokens: 4096, messages }),
+      });
+    } catch { continue; } // network error → try next
 
-    if (!upRes.ok) continue;
-
-    writeSSE(res, { provider: 'OpenRouter', model: m });
+    if (!upRes.ok) {
+      // Log which model/status failed so we can debug
+      console.warn(`[chat] model ${m} returned HTTP ${upRes.status} — trying next`);
+      continue;
+    }
 
     const reader  = upRes.body.getReader();
     const decoder = new TextDecoder();
-    let buffer    = '';
+    let buffer     = '';
+    let sentHeader = false;
+    let gotContent = false;
 
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      buffer += decoder.decode(value, { stream: true });
-      const lines = buffer.split('\n');
-      buffer = lines.pop() ?? '';
-      for (const line of lines) {
-        if (!line.startsWith('data: ')) continue;
-        const raw = line.slice(6).trim();
-        if (!raw || raw === '[DONE]') continue;
-        try {
-          const chunk = JSON.parse(raw);
-          const text  = chunk.choices?.[0]?.delta?.content;
-          if (text) writeSSE(res, { content: text });
-        } catch { /* skip */ }
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() ?? '';
+        for (const line of lines) {
+          if (!line.startsWith('data: ')) continue;
+          const raw = line.slice(6).trim();
+          if (!raw || raw === '[DONE]') continue;
+          try {
+            const chunk = JSON.parse(raw);
+            const text  = chunk.choices?.[0]?.delta?.content;
+            if (text) {
+              if (!sentHeader) {
+                writeSSE(res, { provider: 'OpenRouter', model: m });
+                sentHeader = true;
+              }
+              gotContent = true;
+              writeSSE(res, { content: text });
+            }
+          } catch { /* skip malformed SSE line */ }
+        }
       }
+    } catch { /* stream interrupted — fall through */ }
+
+    if (gotContent) {
+      writeSSE(res, { done: true });
+      res.end();
+      return;
     }
-    writeSSE(res, { done: true });
-    res.end();
-    return;
+
+    // Model responded OK but returned no content (error in stream body, rate-limited, etc.)
+    console.warn(`[chat] model ${m} returned empty content — trying next`);
   }
 
-  writeSSE(res, { error: 'All AI models are currently unavailable.' });
+  writeSSE(res, { error: 'All AI models are currently unavailable. Try again in a moment.' });
   writeSSE(res, { done: true });
   res.end();
 }
