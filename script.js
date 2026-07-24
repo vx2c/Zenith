@@ -65,6 +65,7 @@ function logout() {
 function initApp() {
   renderUser();
   loadAvatar();
+  loadAIStatus();
   const chats = getChats();
   if (!chats.length) { newChat(); return; }
   const lastId = localStorage.getItem('z_active');
@@ -255,6 +256,8 @@ async function sendMsg(content) {
         if (!raw) continue;
         try {
           const parsed = JSON.parse(raw);
+          // Provider/model announcement at start of stream
+          if (parsed.model) setRespondingModel(parsed.model);
           if (parsed.content) {
             fullText += parsed.content;
             textEl.innerHTML = md(fullText);
@@ -268,9 +271,10 @@ async function sendMsg(content) {
       }
     }
   } catch (err) {
-    fullText = 'I had trouble connecting to the AI service. Please check your internet connection and try again.';
+    fullText = 'Could not reach the AI service. Please try again.';
     textEl.innerHTML = md(fullText);
   }
+  clearRespondingModel();
 
   // Save AI reply
   const cs2   = getChats();
@@ -403,6 +407,59 @@ function toggleSidebar() {
   el('btn-collapse').querySelector('svg').innerHTML = state.collapsed
     ? '<polyline points="9 18 15 12 9 6"/>'
     : '<polyline points="15 18 9 12 15 6"/>';
+}
+
+// ── AI Status ─────────────────────────────────
+async function loadAIStatus() {
+  const dot   = el('ai-status-dot');
+  const label = el('ai-status-label');
+  const model = el('ai-model-name');
+  const fbRow = el('ai-fallback-row');
+  if (!dot) return;
+
+  dot.className   = 'ai-status-dot checking';
+  label.textContent = 'Checking…';
+
+  try {
+    const r = await fetch('/api/status');
+    if (!r.ok) throw new Error('status ' + r.status);
+    const data = await r.json();
+
+    const online = data.configured === true;
+    dot.className     = 'ai-status-dot ' + (online ? 'online' : 'offline');
+    label.textContent = online ? 'Online' : 'Key not set';
+
+    // Model display (truncate long names)
+    const m = data.model || '—';
+    model.textContent = m.length > 20 ? m.slice(0, 18) + '…' : m;
+    model.title       = m;
+
+    // Fallback chain badges
+    if (Array.isArray(data.fallbackChain) && fbRow) {
+      fbRow.innerHTML = data.fallbackChain.map((fm, i) =>
+        `<span class="ai-fallback-badge${i === 0 ? ' active' : ''}" title="${esc(fm)}">${
+          esc(fm.split('/')[1]?.split(':')[0] || fm)
+        }</span>`
+      ).join('');
+    }
+  } catch {
+    if (dot) { dot.className = 'ai-status-dot offline'; label.textContent = 'Unavailable'; }
+  }
+
+  // Refresh every 60 s
+  setTimeout(loadAIStatus, 60_000);
+}
+
+/** Show which model is actively responding (during stream) */
+function setRespondingModel(modelId) {
+  const label = el('ai-status-label');
+  if (!label) return;
+  const short = (modelId || '').split('/')[1]?.split(':')[0] || modelId;
+  label.textContent = `${short}…`;
+}
+function clearRespondingModel() {
+  // Re-fetch status to restore correct values
+  loadAIStatus();
 }
 
 // ── Copy server URL ───────────────────────────
