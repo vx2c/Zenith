@@ -1,4 +1,7 @@
+'use strict';
 // Plugin command result — called by the plugin after executing a command from the heartbeat
+const { storeResult } = require('./session-store');
+
 function parseJsonBody(req) {
   return new Promise((resolve, reject) => {
     let body = '';
@@ -18,7 +21,11 @@ module.exports = async function handler(req, res) {
   if (req.method === 'OPTIONS') return res.status(200).end();
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
-  try { await parseJsonBody(req); } catch { /* ignore */ }
+  let body = {};
+  try { body = await parseJsonBody(req); } catch { /* ignore */ }
+
+  const { id, result, error } = body || {};
+  if (id) storeResult(id, result, error ?? null);
 
   return res.status(200).json({ status: 'ok' });
 };

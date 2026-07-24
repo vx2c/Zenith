@@ -1,4 +1,7 @@
+'use strict';
 // Plugin connect endpoint — called by the Roblox Studio plugin when the user clicks Connect
+const { createSession } = require('./session-store');
+
 function parseJsonBody(req) {
   return new Promise((resolve, reject) => {
     let body = '';
@@ -18,12 +21,17 @@ module.exports = async function handler(req, res) {
   if (req.method === 'OPTIONS') return res.status(200).end();
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
-  try { await parseJsonBody(req); } catch { /* ignore */ }
+  let body = {};
+  try { body = await parseJsonBody(req); } catch { /* ignore */ }
+
+  const { placeId, username, placeName } = body || {};
+  const sessionId = createSession({ placeId, username, placeName });
 
   return res.status(200).json({
     status:    'ok',
     connected: true,
     message:   'Connected to Zenith AI',
     version:   '1.0.0',
+    sessionId,
   });
 };

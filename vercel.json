@@ -15,9 +15,11 @@
     }
   ],
   "rewrites": [
-    { "source": "/roblox-callback", "destination": "/roblox-callback.html" },
-    { "source": "/connect",         "destination": "/api/connect" },
-    { "source": "/heartbeat",       "destination": "/api/heartbeat" },
-    { "source": "/command_result",  "destination": "/api/command_result" }
+    { "source": "/roblox-callback",  "destination": "/roblox-callback.html" },
+    { "source": "/connect",          "destination": "/api/connect" },
+    { "source": "/heartbeat",        "destination": "/api/heartbeat" },
+    { "source": "/command_result",   "destination": "/api/command_result" },
+    { "source": "/plugin-status",    "destination": "/api/plugin-status" },
+    { "source": "/queue-command",    "destination": "/api/queue-command" }
   ]
 }

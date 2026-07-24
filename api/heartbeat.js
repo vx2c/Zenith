@@ -1,4 +1,7 @@
+'use strict';
 // Plugin heartbeat — called every ~2 seconds by the plugin to stay alive and receive commands
+const { touchSession, dequeueCommands } = require('./session-store');
+
 function parseJsonBody(req) {
   return new Promise((resolve, reject) => {
     let body = '';
@@ -18,11 +21,21 @@ module.exports = async function handler(req, res) {
   if (req.method === 'OPTIONS') return res.status(200).end();
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
-  try { await parseJsonBody(req); } catch { /* ignore */ }
+  let body = {};
+  try { body = await parseJsonBody(req); } catch { /* ignore */ }
 
-  // Return empty commands list — future versions will dequeue pending commands here
-  return res.status(200).json({
-    status:   'ok',
-    commands: [],
-  });
+  const { sessionId } = body || {};
+
+  if (sessionId) {
+    const found = touchSession(sessionId);
+    if (!found) {
+      // Session expired — tell plugin to reconnect
+      return res.status(200).json({ status: 'ok', commands: [], reconnect: true });
+    }
+    const commands = dequeueCommands(sessionId);
+    return res.status(200).json({ status: 'ok', commands });
+  }
+
+  // No sessionId — legacy fallback (plugin without sessionId support)
+  return res.status(200).json({ status: 'ok', commands: [] });
 };

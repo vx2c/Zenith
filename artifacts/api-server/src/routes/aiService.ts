@@ -37,7 +37,7 @@ const ACTIVE_PROVIDER = "openrouter" as const;
 
 // ── System prompt ────────────────────────────
 
-const SYSTEM_PROMPT =
+const BASE_SYSTEM_PROMPT =
   "You are Zenith, an expert AI assistant for Roblox Studio development. " +
   "You help developers write Lua scripts, debug code, generate GUIs, " +
   "analyze Explorer hierarchies, and automate workflows inside Roblox Studio. " +
@@ -46,6 +46,18 @@ const SYSTEM_PROMPT =
   "Lua 5.1 scripting patterns, Remote Events/Functions, and game design " +
   "best practices. Be concise and practical. When providing code, always use " +
   "triple-backtick fenced code blocks with the language tag (lua, json, etc.).";
+
+function buildSystemPrompt(pluginContext: string | null): string {
+  if (!pluginContext) return BASE_SYSTEM_PROMPT;
+  return (
+    BASE_SYSTEM_PROMPT +
+    "\n\n--- PLUGIN CONNECTION ---\n" +
+    pluginContext + "\n" +
+    "You CAN see and interact with the connected Roblox Studio project through the plugin. " +
+    "When the developer asks about their project, Explorer tree, or scripts, acknowledge " +
+    "that you have an active Studio connection and can read/write scripts via the plugin."
+  );
+}
 
 // ── Types ────────────────────────────────────
 
@@ -77,6 +89,7 @@ export async function streamChat(
   messages: ChatMessage[],
   res: Response,
   preferredModel: ModelId = DEFAULT_MODEL,
+  pluginContext: string | null = null,
 ): Promise<void> {
   const provider = PROVIDERS[ACTIVE_PROVIDER];
   const apiKey   = process.env[provider.envKey];
@@ -91,7 +104,7 @@ export async function streamChat(
   const chain = buildChain(preferredModel);
 
   for (const model of chain) {
-    const outcome = await tryModel(model, messages, apiKey, res);
+    const outcome = await tryModel(model, messages, apiKey, res, pluginContext);
     if (outcome === "success") return;
     if (outcome === "fatal")   return;
     // "retry" → try next model in chain
@@ -134,13 +147,14 @@ async function tryModel(
   messages: ChatMessage[],
   apiKey: string,
   res: Response,
+  pluginContext: string | null = null,
 ): Promise<StreamOutcome> {
   const body = {
     model,
     stream:     true,
     max_tokens: 8192,
     messages: [
-      { role: "system",    content: SYSTEM_PROMPT },
+      { role: "system",    content: buildSystemPrompt(pluginContext) },
       ...messages.map(m => ({
         role:    m.role === "ai" ? "assistant" : "user",
         content: m.content,

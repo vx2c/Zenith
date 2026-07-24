@@ -7,21 +7,20 @@
 // ─────────────────────────────────────────────
 
 const OPENROUTER_BASE = 'https://openrouter.ai/api/v1/chat/completions';
-const SITE_URL        = process.env.SITE_URL || 'https://zenith-ai.vercel.app';
+const SITE_URL        = process.env.SITE_URL || 'https://xzenith.vercel.app';
 const SITE_NAME       = 'Zenith - Roblox Studio AI';
 
 // ── Model registry ───────────────────────────
-/** Primary model and ordered fallback chain. */
 const FALLBACK_CHAIN = [
-  'poolside/laguna-s-2.1:free',
-  'google/gemma-4-31b-it:free',
-  'openai/gpt-oss-20b:free',
+  'qwen/qwen3-coder:free',
+  'deepseek/deepseek-r1:free',
+  'google/gemma-3-27b-it:free',
 ];
 
 const DEFAULT_MODEL = FALLBACK_CHAIN[0];
 
-// ── System prompt ────────────────────────────
-const SYSTEM_PROMPT =
+// ── Base system prompt ───────────────────────
+const BASE_SYSTEM_PROMPT =
   'You are Zenith, an expert AI assistant for Roblox Studio development. ' +
   'You help developers write Lua scripts, debug code, generate GUIs, ' +
   'analyze Explorer hierarchies, and automate workflows inside Roblox Studio. ' +
@@ -31,15 +30,14 @@ const SYSTEM_PROMPT =
   'best practices. Be concise and practical. When providing code, always use ' +
   'triple-backtick fenced code blocks with the language tag (lua, json, etc.).';
 
-// ── Provider registry (for future expansion) ─
+// ── Provider registry ─────────────────────────
 const PROVIDERS = {
   openrouter: {
     name:    'OpenRouter',
     url:     OPENROUTER_BASE,
     envKey:  'OPENROUTER_API_KEY',
-    format:  'openai',   // request/response format family
+    format:  'openai',
   },
-  // gemini: { ... }  ← add future providers here
 };
 
 const ACTIVE_PROVIDER = 'openrouter';
@@ -51,17 +49,12 @@ const ACTIVE_PROVIDER = 'openrouter';
 /**
  * Stream a chat completion via OpenRouter with automatic fallback.
  *
- * Writes SSE events to `res`:
- *   data: { provider, model }          ← emitted once at start
- *   data: { content: "..." }           ← one or more text chunks
- *   data: { error: "..." }             ← on failure
- *   data: { done: true }               ← always last
- *
  * @param {Array<{role:'user'|'ai', content:string}>} messages
  * @param {import('http').ServerResponse} res
  * @param {string} [preferredModel]
+ * @param {string|null} [pluginContext]  — injected into system prompt when a Studio plugin is connected
  */
-async function streamChat(messages, res, preferredModel = DEFAULT_MODEL) {
+async function streamChat(messages, res, preferredModel = DEFAULT_MODEL, pluginContext = null) {
   const apiKey = process.env[PROVIDERS[ACTIVE_PROVIDER].envKey];
   if (!apiKey) {
     _writeSSE(res, { error: 'OPENROUTER_API_KEY is not configured on the server.' });
@@ -73,9 +66,9 @@ async function streamChat(messages, res, preferredModel = DEFAULT_MODEL) {
   const chain = _buildChain(preferredModel);
 
   for (const model of chain) {
-    const outcome = await _tryModel(model, messages, apiKey, res);
-    if (outcome === 'success')       return; // stream finished normally
-    if (outcome === 'fatal')         return; // unrecoverable error, already written
+    const outcome = await _tryModel(model, messages, apiKey, res, pluginContext);
+    if (outcome === 'success')  return;
+    if (outcome === 'fatal')    return;
     // outcome === 'retry' → model unavailable, try next
   }
 
@@ -84,9 +77,7 @@ async function streamChat(messages, res, preferredModel = DEFAULT_MODEL) {
   res.end();
 }
 
-/**
- * Return current AI provider/model status (no network call).
- */
+/** Return current AI provider/model status (no network call). */
 function getStatus() {
   const provider = PROVIDERS[ACTIVE_PROVIDER];
   const hasKey   = !!process.env[provider.envKey];
@@ -115,17 +106,31 @@ function _writeSSE(res, obj) {
   res.write(`data: ${JSON.stringify(obj)}\n\n`);
 }
 
+function _buildSystemPrompt(pluginContext) {
+  if (!pluginContext) return BASE_SYSTEM_PROMPT;
+  return (
+    BASE_SYSTEM_PROMPT +
+    '\n\n--- PLUGIN CONNECTION ---\n' +
+    pluginContext + '\n' +
+    'You CAN see and interact with the connected Roblox Studio project through the plugin. ' +
+    'When the developer asks about their project, Explorer tree, or scripts, acknowledge ' +
+    'that you have an active Studio connection and can read/write scripts via the plugin commands.'
+  );
+}
+
 /**
  * Attempt to stream from a single model.
  * @returns {'success'|'retry'|'fatal'}
  */
-async function _tryModel(model, messages, apiKey, res) {
+async function _tryModel(model, messages, apiKey, res, pluginContext) {
+  const systemPrompt = _buildSystemPrompt(pluginContext);
+
   const body = {
     model,
     stream:     true,
     max_tokens: 8192,
     messages: [
-      { role: 'system', content: SYSTEM_PROMPT },
+      { role: 'system', content: systemPrompt },
       ...messages.map(m => ({
         role:    m.role === 'ai' ? 'assistant' : 'user',
         content: m.content,
@@ -145,8 +150,7 @@ async function _tryModel(model, messages, apiKey, res) {
       },
       body: JSON.stringify(body),
     });
-  } catch (networkErr) {
-    // Network failure — skip this model
+  } catch {
     return 'retry';
   }
 
@@ -154,28 +158,22 @@ async function _tryModel(model, messages, apiKey, res) {
     let errText = '';
     try { errText = await response.text(); } catch { /* ignore */ }
 
-    // 404 / 400 often means model is unavailable → try fallback
     if (response.status === 404 || response.status === 400) return 'retry';
+    if (response.status === 429) return 'retry';
 
-    // 401 Unauthorized → API key problem, stop chain
     if (response.status === 401) {
-      _writeSSE(res, { error: `OpenRouter: Invalid API key (401). Check OPENROUTER_API_KEY.` });
+      _writeSSE(res, { error: 'OpenRouter: Invalid API key (401). Check OPENROUTER_API_KEY.' });
       _writeSSE(res, { done: true });
       res.end();
       return 'fatal';
     }
 
-    // 429 Rate limited → try next model
-    if (response.status === 429) return 'retry';
-
-    // Other errors → stop chain and report
     _writeSSE(res, { error: `OpenRouter error ${response.status}: ${errText.slice(0, 300)}` });
     _writeSSE(res, { done: true });
     res.end();
     return 'fatal';
   }
 
-  // Announce which model is responding
   _writeSSE(res, { provider: 'OpenRouter', model });
 
   const reader  = response.body.getReader();
@@ -197,8 +195,7 @@ async function _tryModel(model, messages, apiKey, res) {
         if (!raw || raw === '[DONE]') continue;
         try {
           const chunk = JSON.parse(raw);
-          // OpenAI-compatible SSE chunk
-          const text = chunk.choices?.[0]?.delta?.content;
+          const text  = chunk.choices?.[0]?.delta?.content;
           if (text) _writeSSE(res, { content: text });
         } catch { /* skip malformed SSE lines */ }
       }

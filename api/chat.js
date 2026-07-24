@@ -1,5 +1,6 @@
 'use strict';
 const { streamChat } = require('./aiService');
+const { getActiveSessions } = require('./session-store');
 
 function parseJsonBody(req) {
   return new Promise((resolve, reject) => {
@@ -11,6 +12,19 @@ function parseJsonBody(req) {
     });
     req.on('error', reject);
   });
+}
+
+/** Build plugin context string injected into the AI system prompt. */
+function buildPluginContext() {
+  const sessions = getActiveSessions();
+  if (!sessions.length) return null;
+  const s = sessions[0];
+  const parts = ['A Roblox Studio plugin is currently connected to Zenith.'];
+  if (s.placeId)   parts.push(`Place ID: ${s.placeId}.`);
+  if (s.username)  parts.push(`Developer (Creator ID): ${s.username}.`);
+  if (s.placeName) parts.push(`Place Name: ${s.placeName}.`);
+  parts.push('The developer can read/write scripts and query the Explorer tree through the plugin.');
+  return parts.join(' ');
 }
 
 module.exports = async function handler(req, res) {
@@ -25,12 +39,13 @@ module.exports = async function handler(req, res) {
   catch { return res.status(400).json({ error: 'Invalid JSON' }); }
 
   const { messages = [], model } = body;
+  const pluginContext = buildPluginContext();
 
-  res.setHeader('Content-Type',  'text/event-stream');
-  res.setHeader('Cache-Control', 'no-cache, no-transform');
-  res.setHeader('Connection',    'keep-alive');
-  res.setHeader('X-Accel-Buffering', 'no');
+  res.setHeader('Content-Type',       'text/event-stream');
+  res.setHeader('Cache-Control',      'no-cache, no-transform');
+  res.setHeader('Connection',         'keep-alive');
+  res.setHeader('X-Accel-Buffering',  'no');
   res.flushHeaders();
 
-  await streamChat(messages, res, model);
+  await streamChat(messages, res, model, pluginContext);
 };

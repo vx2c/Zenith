@@ -1,7 +1,7 @@
 import {
   Cpu, Home, Zap, Settings, User, Send, Loader2, Activity,
   Users, ChevronLeft, ChevronRight, Copy, RefreshCw, ThumbsUp,
-  MoreHorizontal, Square, Plus, Check, Clock, Brain, Globe,
+  MoreHorizontal, Square, Plus, Check, Clock, Brain, Globe, Plug,
 } from 'lucide-react';
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { useSettings, TRANSLATIONS } from '@/hooks/use-settings';
@@ -99,6 +99,37 @@ function mkTheme(isDark: boolean) {
         modalBg: 'rgba(0,0,0,0.6)',
         modalCard: '#fff',
       };
+}
+
+// ── Plugin Status hook ────────────────────────
+interface PluginSession {
+  sessionId:   string;
+  placeId:     string | null;
+  username:    string | null;
+  placeName:   string | null;
+  connectedAt: number;
+  lastSeen:    number;
+}
+
+interface PluginStatusData {
+  connected: boolean;
+  sessions:  PluginSession[];
+}
+
+function usePluginStatus() {
+  const [data, setData] = useState<PluginStatusData | null>(null);
+  async function fetch_() {
+    try {
+      const r = await fetch(`${BASE}/api/plugin-status`);
+      if (r.ok) setData(await r.json());
+    } catch { /* non-fatal */ }
+  }
+  useEffect(() => {
+    fetch_();
+    const t = setInterval(fetch_, 4_000);
+    return () => clearInterval(t);
+  }, []);
+  return data;
 }
 
 // ── AI Status hook ────────────────────────────
@@ -874,6 +905,49 @@ function HomePanel({ userName, isDark, lang }: { userName: string; isDark: boole
   );
 }
 
+// ── Studio Connection Badge ───────────────────
+function StudioBadge({ pluginStatus, isDark, compact }: { pluginStatus: PluginStatusData | null; isDark: boolean; compact?: boolean }) {
+  const th = mkTheme(isDark);
+  const connected = pluginStatus?.connected ?? false;
+  const session   = pluginStatus?.sessions?.[0] ?? null;
+
+  if (compact) {
+    return (
+      <div title={connected ? `Place ${session?.placeId ?? '?'} — ID ${session?.username ?? '?'}` : 'No Studio plugin connected'}
+        style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
+        <span style={{ width: 8, height: 8, borderRadius: '50%', background: connected ? '#22c55e' : '#6b7280',
+          boxShadow: connected ? '0 0 6px #22c55e88' : 'none', flexShrink: 0, display: 'inline-block', transition: 'all 0.3s' }} />
+        <span style={{ fontSize: '0.72rem', fontWeight: 600, color: connected ? '#22c55e' : th.textSub }}>
+          {connected ? 'Studio' : 'No Studio'}
+        </span>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ background: connected ? (isDark ? '#0d2618' : '#f0fdf4') : th.card,
+      border: `1px solid ${connected ? (isDark ? '#1a4530' : '#bbf7d0') : th.cardBorder}`,
+      borderRadius: 14, padding: '0.75rem 0.875rem', transition: 'all 0.3s' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: session ? '0.5rem' : 0 }}>
+        <Plug size={13} color={connected ? '#22c55e' : th.textSub} strokeWidth={2} />
+        <span style={{ fontSize: '0.65rem', fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase',
+          color: connected ? '#22c55e' : th.textSub }}>
+          {connected ? 'Studio conectado' : 'Studio desconectado'}
+        </span>
+        <span style={{ width: 7, height: 7, borderRadius: '50%', background: connected ? '#22c55e' : '#6b7280',
+          boxShadow: connected ? '0 0 5px #22c55e88' : 'none', marginLeft: 'auto', flexShrink: 0,
+          transition: 'all 0.3s', display: 'inline-block' }} />
+      </div>
+      {connected && session && (
+        <div style={{ fontSize: '0.7rem', color: th.textSub, lineHeight: 1.5, paddingLeft: '1px' }}>
+          {session.placeId && <div>Place: <span style={{ fontFamily: 'monospace', color: th.text }}>{session.placeId}</span></div>}
+          {session.username && <div>Dev ID: <span style={{ fontFamily: 'monospace', color: th.text }}>{session.username}</span></div>}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Dashboard ─────────────────────────────────
 export default function Dashboard({ userName }: DashboardProps) {
   const { settings, setTheme, setLanguage } = useSettings();
@@ -881,6 +955,7 @@ export default function Dashboard({ userName }: DashboardProps) {
   const lang = settings.language;
   const T = TRANSLATIONS[lang];
   const th = mkTheme(isDark);
+  const pluginStatus = usePluginStatus();
 
   const [activeNav, setActiveNav] = useState('home');
   const [sidebarOpen, setSidebarOpen] = useState(true);
@@ -975,6 +1050,12 @@ export default function Dashboard({ userName }: DashboardProps) {
               );
             })}
           </nav>
+
+          {/* Studio Connection badge */}
+          {sidebarOpen
+            ? <StudioBadge pluginStatus={pluginStatus} isDark={isDark} />
+            : <StudioBadge pluginStatus={pluginStatus} isDark={isDark} compact />
+          }
 
           {/* AI Status — compact when collapsed */}
           {sidebarOpen && (
