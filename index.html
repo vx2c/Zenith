@@ -8,6 +8,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <link rel="icon" type="image/png" href="/favicon.png" />
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
@@ -18,7 +19,8 @@
   <div class="landing-center">
     <div class="landing-card">
       <div class="landing-logo">
-        <div class="z-icon">Z</div>
+        <img src="/favicon.png" alt="Zenith" class="z-logo-img" style="width:40px;height:40px;object-fit:contain;border-radius:8px;" onerror="this.style.display='none';document.querySelector('.z-icon-fallback').style.display='flex';" />
+        <div class="z-icon z-icon-fallback" style="display:none;">Z</div>
         <span class="z-label">ZENITH</span>
       </div>
       <h1>Studio AI<br />Companion</h1>
@@ -38,7 +40,7 @@
   <aside id="sidebar" class="sidebar">
     <div class="sidebar-header">
       <div class="sidebar-brand">
-        <div class="z-icon sm">Z</div>
+        <img src="/favicon.png" alt="Z" class="z-logo-img" style="width:24px;height:24px;object-fit:contain;border-radius:4px;" onerror="this.style.display='none';" />
         <span class="brand-name">Zenith</span>
       </div>
       <button id="btn-collapse" class="btn-icon" title="Collapse">
@@ -61,6 +63,18 @@
     </nav>
 
     <div class="sidebar-section">
+      <div class="section-label">STUDIO PLUGIN</div>
+      <div class="nav-item" style="cursor:default;gap:8px;pointer-events:none;">
+        <span style="width:8px;height:8px;border-radius:50%;background:#22c55e;flex-shrink:0;box-shadow:0 0 6px #22c55e88;"></span>
+        <span style="font-size:0.8rem;color:#374151;">Ready to connect</span>
+      </div>
+      <button class="nav-item" id="btn-copy-url" onclick="copyServerUrl()">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+        <span>Copy server URL</span>
+      </button>
+    </div>
+
+    <div class="sidebar-section">
       <div class="section-label">RESOURCES</div>
       <button class="nav-item">
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
@@ -79,7 +93,7 @@
 
     <div class="sidebar-user">
       <div class="user-avatar-wrap">
-        <img id="user-avatar" src="" alt="" style="display:none" />
+        <img id="user-avatar" src="" alt="" style="display:none;width:100%;height:100%;object-fit:cover;border-radius:inherit;" />
         <div id="user-avatar-fallback" class="avatar-fallback"></div>
       </div>
       <div class="user-meta">
