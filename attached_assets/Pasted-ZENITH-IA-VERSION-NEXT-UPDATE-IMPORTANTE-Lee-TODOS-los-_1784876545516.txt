@@ -1,0 +1,267 @@
+ZENITH IA - VERSION NEXT UPDATE
+
+IMPORTANTE:
+- Lee TODOS los archivos antes de modificar cualquier cosa.
+- Analiza la arquitectura actual del proyecto.
+- No elimines funcionalidades existentes.
+- Realiza commits separados por cada sección importante.
+- Prioridad: estabilidad > UI > nuevas funciones.
+
+==========================================
+1. SETTINGS PAGE
+==========================================
+
+Crear una página "Settings".
+
+Opciones:
+
+- Language:
+  - English
+  - Spanish
+
+- Theme:
+  - Light (default)
+  - Dark
+
+El modo Dark NO debe ser una simple inversión de colores. Debe tener:
+- Fondo oscuro.
+- Sombras suaves.
+- Bordes transparentes.
+- Mantener la estética de Zenith.
+
+Guardar preferencias en localStorage.
+
+==========================================
+2. SIDEBAR
+==========================================
+
+Problemas actuales:
+
+- El sidebar se oculta pero no puede volver a abrirse.
+- La transición es brusca.
+
+Cambios:
+
+- Agregar animación smooth (300ms).
+- Cuando esté cerrado:
+  - Mostrar SOLO iconos.
+  - Ocultar textos.
+- Mantener botón para expandir.
+- Eliminar:
+  - Copy Server URL.
+
+==========================================
+3. COMMUNITY PANEL
+==========================================
+
+Al presionar "Community":
+
+Abrir modal:
+
+TITLE:
+Join The Community
+
+BUTTON:
+Discord Icon + Zenith IA
+
+DESCRIPTION:
+
+Join the Zenith Community
+
+Connect with Roblox developers, get early access to upcoming features, share your projects, and help shape the future of Roblox Studio AI.
+
+Discord URL:
+
+https://discord.gg/ZRUameCvE9
+
+==========================================
+4. CHAT IMPROVEMENTS
+==========================================
+
+Fuente:
+
+- Inter
+- 16px para mensajes.
+
+Agregar:
+
+- Avatar con borde oscuro.
+- Mejor espaciado.
+- Animación de escritura.
+
+La IA debe responder progresivamente:
+
+Thinking...
+Checking...
+Working...
+Responding...
+
+NO mostrar todo instantáneamente.
+
+==========================================
+5. INPUT SYSTEM
+==========================================
+
+Agregar botón "+".
+
+Opciones:
+
+- Thinking
+- Search The Internet
+
+Si están desactivadas:
+
+- La IA responde directamente.
+
+Si están activadas:
+
+- Debe mostrar estados antes de responder.
+
+==========================================
+6. LARGE TEXT SUPPORT
+==========================================
+
+Si usuario pega:
+
+TEXT:
+> 250 líneas
+
+Crear automáticamente:
+
+Text-Pasted
+
+Ejemplo:
+
+Text-Pasted
+324 lines
+
+Debe enviarse a la IA igualmente.
+
+------------------------------------------
+
+LUA CODE:
+
+10-25 líneas:
+- Mostrar burbuja compacta.
+
+35-1000 líneas:
+- Convertir automáticamente a:
+  - Lua-Pasted
+
+==========================================
+7. MESSAGE ACTIONS
+==========================================
+
+Al finalizar una respuesta:
+
+- Copy
+- Again
+- Like
+- More (...)
+
+More mostrará:
+
+- Hora.
+- Modelo usado.
+- Tiempo de respuesta.
+
+==========================================
+8. STOP GENERATION
+==========================================
+
+Cuando Zenith responde:
+
+Send Button -> Stop
+
+Si usuario lo presiona:
+
+Mostrar:
+
+"Zenith stopped writing."
+
+==========================================
+9. AFK SCREEN
+==========================================
+
+Después de 25 minutos sin actividad:
+
+Mostrar overlay:
+
+TITLE:
+
+<Display Name>, are you AFK?
+
+TEXT BUTTON:
+
+Click To Continue
+
+Requisitos:
+
+- Fondo borroso.
+- Mantener visible la web detrás.
+- Restaurar estado al cerrar.
+
+==========================================
+10. MAIN MENU
+==========================================
+
+NO entrar directamente al chat.
+
+Crear Main Menu.
+
+ELEMENTOS:
+
+- Fondo animado.
+- Light Theme.
+- Dark Theme.
+- Efecto de olas.
+
+TITLE:
+
+ZENITH IA READY TO WORK
+
+Animación:
+- Escribir.
+- Borrar.
+- Repetir.
+
+Mostrar:
+
+- Avatar Roblox.
+- Username.
+
+Texto:
+
+Zenith is waiting to work with you.
+Don't keep them waiting.
+
+Botón:
+
+Click To Enter
+
+- Transparente.
+- Solo texto.
+- Animación hover.
+
+==========================================
+11. AI STATUS
+==========================================
+
+Mantener:
+
+- Online/Offline.
+- Modelo actual.
+- Provider.
+- Fallback chain.
+
+==========================================
+12. FINAL TASK
+==========================================
+
+Verificar:
+
+- No errores de TypeScript.
+- No errores de build.
+- No errores de Vercel.
+- Realizar Push automáticamente.
+- Generar resumen detallado de cambios.
