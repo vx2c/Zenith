@@ -1,0 +1,437 @@
+-- [[ AI CONNECTOR PLUGIN ]]
+-- Para usarlo como plugin de Studio:
+-- 1. Copia este codigo
+-- 2. Abre la carpeta de plugins de Studio (Plugins > Open Plugins Folder)
+-- 3. Crea un archivo llamado AIConnector.plugin.lua
+-- 4. Pega este codigo ahi y guardalo
+-- 5. Reinicia Studio o usa Plugins > Manage Plugins para activarlo
+-- 6. IMPORTANTE: Ve a Game Settings > Security > activa "Allow HTTP Requests"
+
+-- ============================================
+-- CONFIGURACION
+-- ============================================
+local SERVER_URL = "https://xzenith.vercel.app"
+local HEARTBEAT_INTERVAL = 2 -- segundos entre cada heartbeat
+local MAX_HEARTBEAT_FAILURES = 3 -- fallos seguidos antes de desconectar
+
+-- ============================================
+-- SERVICIOS
+-- ============================================
+local HttpService = game:GetService("HttpService")
+
+-- ============================================
+-- CREAR TOOLBAR Y BOTON
+-- ============================================
+local toolbar = plugin:CreateToolbar("AI Connector")
+local button = toolbar:CreateButton("AIConnector", "Abrir AI Connector", "", "AI Connector")
+
+local widgetInfo = DockWidgetPluginGuiInfo.new(
+    Enum.InitialDockState.Float,
+    false,
+    false,
+    326, 300,
+    326, 300
+)
+
+local widget = plugin:CreateDockWidgetPluginGui("AIConnectorGui", widgetInfo)
+widget.Title = "AI Connector"
+
+-- ============================================
+-- CONSTRUIR LA GUI
+-- ============================================
+local MainFrame = Instance.new("Frame")
+MainFrame.Size = UDim2.new(1, 0, 1, 0)
+MainFrame.BackgroundColor3 = Color3.fromRGB(35, 35, 40)
+MainFrame.BorderSizePixel = 0
+MainFrame.Parent = widget
+
+local UICorner = Instance.new("UICorner")
+UICorner.CornerRadius = UDim.new(0, 20)
+UICorner.Parent = MainFrame
+
+local Title = Instance.new("TextLabel")
+Title.Text = "AI Link"
+Title.Size = UDim2.new(1, 0, 0, 50)
+Title.Position = UDim2.new(0, 0, 0.02, 0)
+Title.BackgroundTransparency = 1
+Title.TextColor3 = Color3.fromRGB(255, 255, 255)
+Title.Font = Enum.Font.GothamBold
+Title.TextSize = 22
+Title.Parent = MainFrame
+
+local StatusDot = Instance.new("Frame")
+StatusDot.Size = UDim2.new(0, 12, 0, 12)
+StatusDot.Position = UDim2.new(0.5, -6, 0.22, 0)
+StatusDot.BackgroundColor3 = Color3.fromRGB(255, 80, 80)
+StatusDot.Parent = MainFrame
+Instance.new("UICorner", StatusDot).CornerRadius = UDim.new(1, 0)
+
+local StatusLabel = Instance.new("TextLabel")
+StatusLabel.Name = "StatusLabel"
+StatusLabel.Size = UDim2.new(1, 0, 0, 25)
+StatusLabel.Position = UDim2.new(0, 0, 0.28, 0)
+StatusLabel.BackgroundTransparency = 1
+StatusLabel.TextColor3 = Color3.fromRGB(200, 200, 200)
+StatusLabel.Font = Enum.Font.Gotham
+StatusLabel.TextSize = 14
+StatusLabel.Text = "Disconnected"
+StatusLabel.Parent = MainFrame
+
+-- Mostrar la URL del servidor (solo lectura)
+local UrlLabel = Instance.new("TextLabel")
+UrlLabel.Name = "UrlLabel"
+UrlLabel.Size = UDim2.new(0, 280, 0, 24)
+UrlLabel.Position = UDim2.new(0.5, -140, 0.40, 0)
+UrlLabel.BackgroundColor3 = Color3.fromRGB(50, 50, 55)
+UrlLabel.TextColor3 = Color3.fromRGB(160, 160, 200)
+UrlLabel.Font = Enum.Font.Gotham
+UrlLabel.TextSize = 11
+UrlLabel.Text = SERVER_URL
+UrlLabel.Parent = MainFrame
+Instance.new("UICorner", UrlLabel).CornerRadius = UDim.new(0, 8)
+
+local ConnectButton = Instance.new("TextButton")
+ConnectButton.Name = "Conector"
+ConnectButton.Text = "Connect"
+ConnectButton.Size = UDim2.new(0, 180, 0, 45)
+ConnectButton.Position = UDim2.new(0.5, -90, 0.55, 0)
+ConnectButton.BackgroundColor3 = Color3.fromRGB(60, 60, 65)
+ConnectButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+ConnectButton.Font = Enum.Font.GothamSemibold
+ConnectButton.TextSize = 16
+ConnectButton.Parent = MainFrame
+Instance.new("UICorner", ConnectButton).CornerRadius = UDim.new(0, 12)
+
+-- Log de mensajes
+local LogBox = Instance.new("TextLabel")
+LogBox.Name = "LogBox"
+LogBox.Size = UDim2.new(0, 296, 0, 50)
+LogBox.Position = UDim2.new(0.5, -148, 0.75, 0)
+LogBox.BackgroundColor3 = Color3.fromRGB(45, 45, 50)
+LogBox.TextColor3 = Color3.fromRGB(180, 180, 180)
+LogBox.Font = Enum.Font.Code
+LogBox.TextSize = 11
+LogBox.Text = "Log: Ready"
+LogBox.TextWrapped = true
+LogBox.TextXAlignment = Enum.TextXAlignment.Left
+LogBox.TextYAlignment = Enum.TextYAlignment.Top
+LogBox.Parent = MainFrame
+Instance.new("UICorner", LogBox).CornerRadius = UDim.new(0, 8)
+
+-- ============================================
+-- ESTADO DE CONEXION
+-- ============================================
+local isConnecting = false
+local isConnected = false
+local heartbeatRunning = false
+local sessionId = nil
+
+-- ============================================
+-- UTILIDADES
+-- ============================================
+local function log(msg)
+    LogBox.Text = "Log: " .. msg
+    print("[AI Connector] " .. msg)
+end
+
+local function updateUI(connected)
+    if connected then
+        StatusLabel.Text = "Connected"
+        ConnectButton.Text = "Disconnect"
+        ConnectButton.BackgroundColor3 = Color3.fromRGB(80, 255, 120)
+        StatusDot.BackgroundColor3 = Color3.fromRGB(80, 255, 120)
+    else
+        StatusLabel.Text = "Disconnected"
+        ConnectButton.Text = "Connect"
+        ConnectButton.BackgroundColor3 = Color3.fromRGB(60, 60, 65)
+        StatusDot.BackgroundColor3 = Color3.fromRGB(255, 80, 80)
+    end
+end
+
+-- ============================================
+-- RESOLUCION DE PATHS
+-- ============================================
+local function resolvePath(path)
+    -- Divide "ServerScriptService.Folder.Script" en partes
+    local parts = string.split(path, ".")
+    local current = game
+    for i = 1, #parts - 1 do
+        -- Intentar con GetService primero (para servicios)
+        if i == 1 then
+            local ok, service = pcall(function() return game:GetService(parts[1]) end)
+            if ok and service then
+                current = game:GetService(parts[1])
+            else
+                current = game:FindFirstChild(parts[1])
+            end
+        else
+            current = current and current:FindFirstChild(parts[i])
+        end
+        if not current then break end
+    end
+    -- El ultimo elemento es el nombre (no navegarlo)
+    local name = parts[#parts]
+    return current, name
+end
+
+local function resolveFull(path)
+    -- Navega el path completo y devuelve el objeto final
+    local parts = string.split(path, ".")
+    local current = game
+    for i, part in ipairs(parts) do
+        if i == 1 then
+            local ok, service = pcall(function() return game:GetService(part) end)
+            if ok and service then
+                current = service
+            else
+                current = game:FindFirstChild(part)
+            end
+        else
+            current = current and current:FindFirstChild(part)
+        end
+        if not current then break end
+    end
+    return current
+end
+
+-- ============================================
+-- EJECUCION DE COMANDOS RECIBIDOS DEL SERVIDOR
+-- ============================================
+local function executeCommand(cmd)
+    if not cmd or not cmd.type then
+        return { success = false, error = "Invalid command" }
+    end
+    
+    local args = cmd.args or {}
+    
+    if cmd.type == "ping" then
+        log("ping -> pong")
+        return "pong"
+    
+    elseif cmd.type == "get_tree" then
+        local services = {}
+        for _, service in ipairs(game:GetChildren()) do
+            table.insert(services, service.Name)
+        end
+        log("get_tree -> " .. #services .. " services")
+        return { services = services }
+    
+    elseif cmd.type == "read_script" then
+        local path = args.path
+        if not path then
+            return { error = "Missing 'path' in args" }
+        end
+        local target = resolveFull(path)
+        if not target then
+            return { error = "Not found: " .. path }
+        end
+        if not target:IsA("BaseScript") and not target:IsA("ModuleScript") then
+            return { error = "Not a script: " .. path }
+        end
+        log("read_script: " .. path)
+        return { source = target.Source }
+    
+    elseif cmd.type == "create_script" then
+        local path = args.path
+        local scriptType = args.type or "Script"
+        local source = args.source or ""
+        if not path then
+            return { error = "Missing 'path' in args" }
+        end
+        -- Validar tipo de script
+        if scriptType ~= "Script" and scriptType ~= "LocalScript" and scriptType ~= "ModuleScript" then
+            return { error = "Invalid script type: " .. tostring(scriptType) }
+        end
+        -- Resolver el parent (todo menos el ultimo segmento)
+        local parent, name = resolvePath(path)
+        if not parent then
+            return { error = "Parent not found for path: " .. path }
+        end
+        -- Crear el script
+        local newScript = Instance.new(scriptType)
+        newScript.Name = name
+        newScript.Source = source
+        newScript.Parent = parent
+        log("create_script: " .. path .. " (" .. scriptType .. ")")
+        return { path = newScript:GetFullName(), name = newScript.Name }
+    
+    elseif cmd.type == "update_script" then
+        local path = args.path
+        local source = args.source or ""
+        if not path then
+            return { error = "Missing 'path' in args" }
+        end
+        local target = resolveFull(path)
+        if not target then
+            return { error = "Not found: " .. path }
+        end
+        if not target:IsA("BaseScript") and not target:IsA("ModuleScript") then
+            return { error = "Not a script: " .. path }
+        end
+        target.Source = source
+        log("update_script: " .. path)
+        return { success = true }
+    end
+    
+    return { error = "Unknown command type: " .. tostring(cmd.type) }
+end
+
+-- ============================================
+-- CONEXION HTTP REAL
+-- ============================================
+local function sendRequest(endpoint, body)
+    local url = SERVER_URL .. endpoint
+    
+    local requestData = {
+        Url = url,
+        Method = "POST",
+        Headers = { ["Content-Type"] = "application/json" },
+    }
+    
+    if body then
+        requestData.Body = HttpService:JSONEncode(body)
+    end
+    
+    local success, response = pcall(function()
+        return HttpService:RequestAsync(requestData)
+    end)
+    
+    return success, response
+end
+
+local function startHeartbeat()
+    if heartbeatRunning then return end
+    heartbeatRunning = true
+    local failCount = 0
+    
+    task.spawn(function()
+        while isConnected and heartbeatRunning do
+            -- Heartbeat con sessionId
+            local success, response = sendRequest("/heartbeat", { sessionId = sessionId })
+            
+            if not success or not response.Success then
+                failCount = failCount + 1
+                log("Heartbeat failed (" .. failCount .. "/" .. MAX_HEARTBEAT_FAILURES .. ")")
+                
+                if failCount >= MAX_HEARTBEAT_FAILURES then
+                    log("Max heartbeat failures reached - disconnecting")
+                    isConnected = false
+                    heartbeatRunning = false
+                    updateUI(false)
+                    break
+                end
+            else
+                failCount = 0 -- Reset contador si hay exito
+                
+                -- Procesar comandos del servidor
+                local ok, data = pcall(function()
+                    return HttpService:JSONDecode(response.Body)
+                end)
+                
+                if ok and data and data.commands then
+                    for _, cmd in ipairs(data.commands) do
+                        -- Ejecutar el comando
+                        local pcallSuccess, pcallResult = pcall(function()
+                            return executeCommand(cmd)
+                        end)
+                        
+                        local cmdResult
+                        local cmdError = nil
+                        
+                        if pcallSuccess then
+                            cmdResult = pcallResult
+                        else
+                            cmdResult = nil
+                            cmdError = tostring(pcallResult)
+                            log("Command error: " .. cmdError)
+                        end
+                        
+                        -- Enviar resultado al servidor
+                        pcall(function()
+                            sendRequest("/command_result", {
+                                id = cmd.id,
+                                result = cmdResult,
+                                error = cmdError
+                            })
+                        end)
+                    end
+                end
+            end
+            
+            task.wait(HEARTBEAT_INTERVAL)
+        end
+    end)
+end
+
+local function connect()
+    if isConnected then
+        -- Desconectar
+        isConnected = false
+        heartbeatRunning = false
+        updateUI(false)
+        log("Disconnected")
+        return
+    end
+    
+    if isConnecting then return end
+    isConnecting = true
+    ConnectButton.Text = "Connecting..."
+    
+    -- Animacion de puntos mientras conecta
+    task.spawn(function()
+        local dots = 0
+        while isConnecting do
+            dots = (dots + 1) % 4
+            StatusLabel.Text = "Waiting" .. string.rep(".", dots)
+            task.wait(0.5)
+        end
+    end)
+    
+    -- Intento de conexion: POST /connect con body vacio {}
+    local success, response = sendRequest("/connect", {
+        placeId  = tostring(game.PlaceId),
+        username = game.CreatorId and tostring(game.CreatorId) or "unknown",
+    })
+    
+    isConnecting = false
+    
+    if success and response.Success then
+        -- Decodificar la respuesta del servidor
+        local ok, data = pcall(function()
+            return HttpService:JSONDecode(response.Body)
+        end)
+        
+        if ok and data and data.connected == true then
+            isConnected = true
+            sessionId = data.sessionId or nil
+            updateUI(true)
+            local version = data.version or "unknown"
+            local message = data.message or "Connected"
+            log("Connected - " .. message .. " (v" .. version .. ")")
+            startHeartbeat()
+        else
+            StatusLabel.Text = "Connection Failed"
+            ConnectButton.Text = "Retry"
+            log("Server did not confirm connection")
+        end
+    else
+        local errMsg = "Unknown error"
+        if not success then
+            errMsg = tostring(response)
+        elseif response.StatusCode then
+            errMsg = "HTTP " .. response.StatusCode
+        end
+        StatusLabel.Text = "Connection Failed"
+        ConnectButton.Text = "Retry"
+        log("Connection failed: " .. errMsg)
+    end
+end
+
+ConnectButton.MouseButton1Click:Connect(connect)
+
+-- Mostrar/ocultar el widget al hacer click en el boton del toolbar
+button.Click:Connect(function()
+    widget.Enabled = not widget.Enabled
+end)
+
+log("Plugin loaded - ready to connect")
