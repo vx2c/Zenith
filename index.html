@@ -33,6 +33,25 @@
   </div>
 </div>
 
+<!-- ═══════════════════════ MAIN MENU ═══════════════════════ -->
+<div id="main-menu" class="main-menu-shell hidden">
+  <div class="mm-bg" id="mm-bg"></div>
+  <div class="mm-grid"></div>
+  <div class="mm-content">
+    <div class="mm-avatar-wrap">
+      <img id="mm-avatar-img" src="" alt="" style="display:none;width:100%;height:100%;object-fit:cover;border-radius:50%;" />
+      <div id="mm-avatar-fallback" class="mm-avatar-fallback"></div>
+      <div class="mm-online-dot"></div>
+    </div>
+    <div id="mm-username" class="mm-username"></div>
+    <h1 class="mm-title">
+      <span id="mm-typewriter"></span><span class="mm-cursor">|</span>
+    </h1>
+    <p class="mm-sub">Zenith is waiting to work with you.<br/>Don't keep them waiting.</p>
+    <button id="btn-enter" class="btn-enter">Click To Enter</button>
+  </div>
+</div>
+
 <!-- ═══════════════════════ APP ═══════════════════════ -->
 <div id="app" class="app-shell hidden">
 
@@ -41,69 +60,69 @@
     <div class="sidebar-header">
       <div class="sidebar-brand">
         <img src="/favicon.png" alt="Z" class="z-logo-img" style="width:24px;height:24px;object-fit:contain;border-radius:4px;" onerror="this.style.display='none';" />
-        <span class="brand-name">Zenith</span>
+        <span class="brand-name sidebar-text">Zenith</span>
       </div>
-      <button id="btn-collapse" class="btn-icon" title="Collapse">
+      <button id="btn-collapse" class="btn-icon sidebar-text" title="Collapse">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"/></svg>
       </button>
     </div>
 
     <div class="sidebar-top">
-      <button id="btn-new-chat" class="btn-new-chat">
+      <button id="btn-new-chat" class="btn-new-chat" title="New Chat">
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-        <span>New Chat</span>
+        <span class="sidebar-text">New Chat</span>
       </button>
     </div>
 
     <nav class="sidebar-nav">
-      <button class="nav-item active" id="nav-home">
+      <button class="nav-item active" id="nav-home" title="Home">
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
-        <span>Home</span>
+        <span class="sidebar-text">Home</span>
+      </button>
+      <button class="nav-item" id="nav-settings" title="Settings">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+        <span class="sidebar-text">Settings</span>
       </button>
     </nav>
 
     <div class="sidebar-section">
-      <div class="section-label">STUDIO PLUGIN</div>
-      <div class="nav-item" style="cursor:default;gap:8px;pointer-events:none;">
+      <div class="section-label sidebar-text">STUDIO PLUGIN</div>
+      <div class="nav-item" style="cursor:default;gap:8px;pointer-events:none;" title="Ready to connect">
         <span style="width:8px;height:8px;border-radius:50%;background:#22c55e;flex-shrink:0;box-shadow:0 0 6px #22c55e88;"></span>
-        <span style="font-size:0.8rem;color:#374151;">Ready to connect</span>
+        <span class="sidebar-text" style="font-size:0.8rem;">Ready to connect</span>
       </div>
-      <button class="nav-item" id="btn-copy-url" onclick="copyServerUrl()">
-        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
-        <span>Copy server URL</span>
+      <button class="nav-item" id="btn-community" title="Community">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+        <span class="sidebar-text">Community</span>
       </button>
     </div>
 
     <!-- ── AI STATUS ─────────────────────── -->
     <div class="sidebar-section" id="ai-status-section">
-      <div class="section-label">AI STATUS</div>
+      <div class="section-label sidebar-text">AI STATUS</div>
       <div class="ai-status-card" id="ai-status-card">
         <div class="ai-status-row">
           <span class="ai-status-dot" id="ai-status-dot"></span>
-          <span class="ai-status-label" id="ai-status-label">Checking…</span>
+          <span class="ai-status-label sidebar-text" id="ai-status-label">Checking…</span>
         </div>
-        <div class="ai-status-meta">
+        <div class="ai-status-meta sidebar-text">
           <span class="ai-meta-chip" id="ai-provider-chip">OpenRouter</span>
           <span class="ai-model-name" id="ai-model-name" title="">—</span>
         </div>
-        <div class="ai-fallback-row" id="ai-fallback-row"></div>
+        <div class="ai-fallback-row sidebar-text" id="ai-fallback-row"></div>
       </div>
     </div>
 
     <div class="sidebar-section">
-      <div class="section-label">RESOURCES</div>
-      <button class="nav-item">
+      <div class="section-label sidebar-text">RESOURCES</div>
+      <button class="nav-item" title="Get Plugin">
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-        <span>Get Plugin</span>
-      </button>
-      <button class="nav-item">
-        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></svg>
-        <span>Community</span>
+        <span class="sidebar-text">Get Plugin</span>
       </button>
     </div>
 
     <div class="sidebar-recent">
-      <div class="section-label">RECENT</div>
+      <div class="section-label sidebar-text">RECENT</div>
       <ul id="recent-list"></ul>
     </div>
 
@@ -112,11 +131,11 @@
         <img id="user-avatar" src="" alt="" style="display:none;width:100%;height:100%;object-fit:cover;border-radius:inherit;" />
         <div id="user-avatar-fallback" class="avatar-fallback"></div>
       </div>
-      <div class="user-meta">
+      <div class="user-meta sidebar-text">
         <div id="user-displayname" class="user-dn"></div>
         <div id="user-username" class="user-un"></div>
       </div>
-      <button id="btn-logout" class="btn-icon" title="Sign out">
+      <button id="btn-logout" class="btn-icon sidebar-text" title="Sign out">
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
       </button>
     </div>
@@ -125,45 +144,131 @@
   <!-- MAIN -->
   <main id="main" class="main-area">
 
-    <div id="messages" class="messages-area">
-      <div id="empty-state" class="empty-state">
-        <div class="z-icon lg">Z</div>
-        <h2>How can I help you?</h2>
-        <p>Ask anything about Roblox Studio development.</p>
+    <!-- Home Panel -->
+    <div id="panel-home" class="panel">
+      <div id="messages" class="messages-area">
+        <div id="empty-state" class="empty-state">
+          <div class="z-icon lg">Z</div>
+          <h2>How can I help you?</h2>
+          <p>Ask anything about Roblox Studio development.</p>
+        </div>
+      </div>
+
+      <!-- Activity Panel -->
+      <div id="activity-panel" class="activity-panel hidden">
+        <div id="activity-toggle" class="activity-header">
+          <div class="activity-left">
+            <span class="pulse-ring"></span>
+            <span id="activity-summary">Zenith is working…</span>
+          </div>
+          <button id="activity-arrow" class="btn-icon activity-chevron">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>
+          </button>
+        </div>
+        <div id="activity-body" class="activity-body"></div>
+      </div>
+
+      <!-- Input -->
+      <div class="input-area">
+        <!-- Plus menu -->
+        <div class="plus-menu-wrap">
+          <button id="btn-plus" class="btn-plus" title="Options">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+          </button>
+          <div id="plus-menu" class="plus-menu hidden">
+            <button class="plus-item" id="plus-thinking">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 8v4l3 3"/></svg>
+              <span>Thinking</span>
+              <span class="plus-check hidden" id="check-thinking">✓</span>
+            </button>
+            <button class="plus-item" id="plus-search">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+              <span>Search Internet</span>
+              <span class="plus-check hidden" id="check-search">✓</span>
+            </button>
+          </div>
+        </div>
+        <!-- Mode chips -->
+        <div id="mode-chips" class="mode-chips"></div>
+        <div class="input-wrap">
+          <textarea id="chat-input" rows="1" placeholder="Describe what you want to build, or ask a scripting question…"></textarea>
+          <div class="input-btns">
+            <button id="btn-send" class="btn-send" title="Send">
+              <svg id="send-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+              <svg id="stop-icon" width="14" height="14" viewBox="0 0 24 24" fill="currentColor" style="display:none;"><rect x="4" y="4" width="16" height="16" rx="2"/></svg>
+            </button>
+          </div>
+        </div>
+        <p class="input-note">Zenith may make mistakes. Verify important scripts before using them in production.</p>
       </div>
     </div>
 
-    <!-- Activity Panel -->
-    <div id="activity-panel" class="activity-panel hidden">
-      <div id="activity-toggle" class="activity-header">
-        <div class="activity-left">
-          <span class="pulse-ring"></span>
-          <span id="activity-summary">Zenith is working…</span>
+    <!-- Settings Panel -->
+    <div id="panel-settings" class="panel hidden">
+      <div class="settings-page">
+        <div class="settings-header">
+          <h2>Settings</h2>
+          <p>Manage your Zenith preferences.</p>
         </div>
-        <button id="activity-arrow" class="btn-icon activity-chevron">
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>
-        </button>
-      </div>
-      <div id="activity-body" class="activity-body"></div>
-    </div>
 
-    <!-- Input -->
-    <div class="input-area">
-      <div class="input-wrap">
-        <textarea id="chat-input" rows="1" placeholder="Describe what you want to build, or ask a scripting question…"></textarea>
-        <div class="input-btns">
-          <button id="btn-attach" class="btn-icon" title="Attach">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>
-          </button>
-          <button id="btn-send" class="btn-send" title="Send">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
-          </button>
+        <div class="settings-section">
+          <div class="settings-label">Language</div>
+          <div class="settings-options">
+            <button class="settings-opt" id="opt-en" onclick="setLang('en')">
+              <span class="opt-flag">🇺🇸</span>
+              <span>English</span>
+            </button>
+            <button class="settings-opt" id="opt-es" onclick="setLang('es')">
+              <span class="opt-flag">🇪🇸</span>
+              <span>Spanish</span>
+            </button>
+          </div>
+        </div>
+
+        <div class="settings-section">
+          <div class="settings-label">Theme</div>
+          <div class="settings-options">
+            <button class="settings-opt" id="opt-light" onclick="setTheme('light')">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
+              <span>Light</span>
+            </button>
+            <button class="settings-opt" id="opt-dark" onclick="setTheme('dark')">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+              <span>Dark</span>
+            </button>
+          </div>
         </div>
       </div>
-      <p class="input-note">Zenith may make mistakes. Verify important scripts before using them in production.</p>
     </div>
 
   </main>
+</div>
+
+<!-- ═══════════ AFK OVERLAY ═══════════ -->
+<div id="afk-overlay" class="afk-overlay hidden">
+  <div class="afk-card">
+    <div class="afk-icon">💤</div>
+    <h3 id="afk-title">Are you AFK?</h3>
+    <button id="btn-afk-continue" class="btn-afk-continue">Click To Continue</button>
+  </div>
+</div>
+
+<!-- ═══════════ COMMUNITY MODAL ═══════════ -->
+<div id="modal-community" class="modal-overlay hidden">
+  <div class="modal glass">
+    <div class="modal-icon discord-icon">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor"><path d="M20.317 4.37a19.791 19.791 0 0 0-4.885-1.515.074.074 0 0 0-.079.037c-.21.375-.444.864-.608 1.25a18.27 18.27 0 0 0-5.487 0 12.64 12.64 0 0 0-.617-1.25.077.077 0 0 0-.079-.037A19.736 19.736 0 0 0 3.677 4.37a.07.07 0 0 0-.032.027C.533 9.046-.32 13.58.099 18.057.1 18.08.11 18.1.128 18.115a19.9 19.9 0 0 0 5.993 3.03.078.078 0 0 0 .084-.028 14.09 14.09 0 0 0 1.226-1.994.076.076 0 0 0-.041-.106 13.107 13.107 0 0 1-1.872-.892.077.077 0 0 1-.008-.128 10.2 10.2 0 0 0 .372-.292.074.074 0 0 1 .077-.01c3.928 1.793 8.18 1.793 12.062 0a.074.074 0 0 1 .078.01c.12.098.246.198.373.292a.077.077 0 0 1-.006.127 12.299 12.299 0 0 1-1.873.892.077.077 0 0 0-.041.107c.36.698.772 1.362 1.225 1.993a.076.076 0 0 0 .084.028 19.839 19.839 0 0 0 6.002-3.03.077.077 0 0 0 .032-.054c.5-5.177-.838-9.674-3.549-13.66a.061.061 0 0 0-.031-.03zM8.02 15.33c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.956-2.419 2.157-2.419 1.21 0 2.176 1.096 2.157 2.42 0 1.333-.956 2.418-2.157 2.418zm7.975 0c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.955-2.419 2.157-2.419 1.21 0 2.176 1.096 2.157 2.42 0 1.333-.946 2.418-2.157 2.418z"/></svg>
+    </div>
+    <h3>Join The Community</h3>
+    <p>Connect with Roblox developers, get early access to upcoming features, share your projects, and help shape the future of Roblox Studio AI.</p>
+    <a href="https://discord.gg/ZRUameCvE9" target="_blank" rel="noopener" class="btn-discord">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M20.317 4.37a19.791 19.791 0 0 0-4.885-1.515.074.074 0 0 0-.079.037c-.21.375-.444.864-.608 1.25a18.27 18.27 0 0 0-5.487 0 12.64 12.64 0 0 0-.617-1.25.077.077 0 0 0-.079-.037A19.736 19.736 0 0 0 3.677 4.37a.07.07 0 0 0-.032.027C.533 9.046-.32 13.58.099 18.057.1 18.08.11 18.1.128 18.115a19.9 19.9 0 0 0 5.993 3.03.078.078 0 0 0 .084-.028 14.09 14.09 0 0 0 1.226-1.994.076.076 0 0 0-.041-.106 13.107 13.107 0 0 1-1.872-.892.077.077 0 0 1-.008-.128 10.2 10.2 0 0 0 .372-.292.074.074 0 0 1 .077-.01c3.928 1.793 8.18 1.793 12.062 0a.074.074 0 0 1 .078.01c.12.098.246.198.373.292a.077.077 0 0 1-.006.127 12.299 12.299 0 0 1-1.873.892.077.077 0 0 0-.041.107c.36.698.772 1.362 1.225 1.993a.076.076 0 0 0 .084.028 19.839 19.839 0 0 0 6.002-3.03.077.077 0 0 0 .032-.054c.5-5.177-.838-9.674-3.549-13.66a.061.061 0 0 0-.031-.03z"/></svg>
+      Zenith IA — Join Discord
+    </a>
+    <div class="modal-actions" style="justify-content:center;">
+      <button id="modal-community-close" class="btn-secondary">Close</button>
+    </div>
+  </div>
 </div>
 
 <!-- ═══════════ DELETE MODAL ═══════════ -->
