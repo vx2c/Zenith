@@ -133,6 +133,8 @@ function buildSystemPrompt(session, needsStudio) {
     '  T9. Before the first mutating call, output one line starting with "PLAN:" listing the steps.',
     ' T10. Never delete or overwrite content unless the user explicitly asked for that exact change.',
     ' T11. Never invent Roblox property values, paths, or class names you haven\'t read from TOOL_RESULT.',
+    ' T12. After a WRITE tool succeeds: confirm in 1–2 sentences. NEVER show the Lua source code you wrote.',
+    ' T13. After a READ tool succeeds: summarize findings. Show code only if the developer asked to see it.',
     '',
     'Available tools:',
     '  TOOL:{"name":"ping","args":{}}',
@@ -537,9 +539,22 @@ async function plainStream(messages, apiKey, model, res) {
   res.end();
 }
 
+// ── Write tool classification ──────────────────────────────────────────────
+// Write tools mutate Studio. After they succeed the AI must NOT reproduce
+// the source code it just wrote — that creates a slow, cluttered response
+// and is identical to hallucination from the developer's perspective.
+const WRITE_TOOLS = new Set([
+  'update_script', 'create_script', 'append_script', 'create_module',
+  'format_script', 'create_instance', 'create_gui', 'create_ui_element',
+  'update_ui_element', 'create_part', 'create_model', 'create_spawn',
+  'create_remote_event', 'create_remote_function', 'create_folder',
+  'rename_instance', 'move_instance', 'clone_instance', 'delete_instance',
+  'set_properties', 'set_attributes', 'save_place', 'clear_output',
+]);
+
 // ── Build TOOL_RESULT injection message ───────────────────────────────────
-// The framing here is critical to prevent the AI from claiming success,
-// fabricating what happened, or skipping subsequent required tools.
+// Framing is write-tool-aware: write tools get a strict "no code" rule,
+// read tools get a summarize rule that allows referencing content.
 function buildToolResultMessage(toolName, toolResult, isError) {
   const resultJson = JSON.stringify(toolResult, null, 2);
 
@@ -547,25 +562,38 @@ function buildToolResultMessage(toolName, toolResult, isError) {
     return (
       `TOOL_RESULT [${toolName}] — FAILED\n` +
       `${resultJson}\n\n` +
-      `The tool did NOT succeed. You MUST NOT claim the action was completed.\n` +
-      `Options:\n` +
-      `  1. Explain the error to the developer clearly.\n` +
-      `  2. If recoverable (e.g. wrong path), use a different tool to fix it (call get_tree to locate the correct path).\n` +
-      `  3. Never fabricate a success message after a failure.\n` +
-      `Respond now based on this failure result.`
+      `RESPONSE RULES:\n` +
+      `  - Explain the error in plain language (1–2 sentences).\n` +
+      `  - Do NOT show Lua code or JSON data.\n` +
+      `  - If recoverable (wrong path, etc.), output a TOOL:{...} fix immediately.\n` +
+      `  - Never claim the action succeeded.`
     );
   }
 
+  if (WRITE_TOOLS.has(toolName)) {
+    return (
+      `TOOL_RESULT [${toolName}] — SUCCESS\n` +
+      `${resultJson}\n\n` +
+      `RESPONSE RULES (WRITE OPERATION — STRICT):\n` +
+      `  - Confirm what was done in 1–2 sentences. Name the specific instance or path.\n` +
+      `  - Do NOT reproduce or display any Lua source code — not even a snippet.\n` +
+      `  - Do NOT show raw JSON data from the result.\n` +
+      `  - Do NOT open a code block. Do NOT say "Here is the code:" or similar.\n` +
+      `  - If another tool is still needed, output TOOL:{...} now instead of explaining.\n` +
+      `  - Base your answer ONLY on this TOOL_RESULT. Do not invent details.`
+    );
+  }
+
+  // Read / inspect tools (read_script, get_tree, find_instances, etc.)
   return (
     `TOOL_RESULT [${toolName}] — SUCCESS\n` +
     `${resultJson}\n\n` +
-    `The tool executed successfully. The above data is the authoritative result from Roblox Studio.\n` +
-    `Rules:\n` +
-    `  - Base your response ONLY on this result, not on assumptions.\n` +
-    `  - If more tools are needed to complete the task, output the next TOOL:{...} call now.\n` +
-    `  - If the task is complete, summarize what was done based on this result. Be specific.\n` +
-    `  - Do NOT say "Done" or "Listo" without referencing what the result shows.\n` +
-    `Respond now.`
+    `RESPONSE RULES (READ OPERATION):\n` +
+    `  - Summarize the key findings concisely.\n` +
+    `  - Show code only if the developer explicitly asked to see the source.\n` +
+    `  - Do NOT reproduce the full output verbatim.\n` +
+    `  - If another tool is needed to complete the task, output TOOL:{...} now.\n` +
+    `  - Base your answer ONLY on this TOOL_RESULT.`
   );
 }
 
@@ -582,6 +610,40 @@ function buildToolEnforcementMessage(userContent) {
   );
 }
 
+// ── Per-round mode directives ──────────────────────────────────────────────
+// These are injected as the final system message in each AI call so the
+// model always reads the current-phase instruction last.
+//
+// TOOL_CALL phase  — before any tool has run: output ONLY the tool call.
+// EXPLANATION phase — after TOOL_RESULT: respond without source-code dumps.
+
+const TOOL_CALL_DIRECTIVE =
+  'DIRECTIVE — TOOL SELECTION MODE:\n' +
+  'Output ONLY the next TOOL:{...} JSON line needed to fulfil this request.\n' +
+  'One optional "PLAN: ..." prefix line is allowed (one sentence, no code).\n' +
+  'Do NOT write Lua code, explanations, or commentary of any kind.\n' +
+  'Do NOT call more than one tool — one TOOL:{...} per response, then stop.';
+
+const EXPLANATION_DIRECTIVE =
+  'DIRECTIVE — EXPLANATION MODE:\n' +
+  'You have received a TOOL_RESULT. Respond to the developer now.\n' +
+  'WRITE tools (update_script, create_script, append_script, create_instance, etc.):\n' +
+  '  • 1–2 sentences confirming what was done. Name the path or instance.\n' +
+  '  • Do NOT show Lua source code. Do NOT open a code block.\n' +
+  '  • Do NOT show raw JSON output.\n' +
+  'READ tools (read_script, get_tree, find_instances, get_properties, etc.):\n' +
+  '  • Summarize key findings briefly.\n' +
+  '  • Show code only if the developer explicitly asked to see it.\n' +
+  'ALL cases:\n' +
+  '  • If another tool is still needed, output TOOL:{...} instead of explaining.\n' +
+  '  • Never claim success beyond what the TOOL_RESULT confirms.\n' +
+  '  • Never reproduce the full TOOL_RESULT verbatim.';
+
+function buildCallMessages(messages, toolsExecuted) {
+  const directive = toolsExecuted === 0 ? TOOL_CALL_DIRECTIVE : EXPLANATION_DIRECTIVE;
+  return [...messages, { role: 'system', content: directive }];
+}
+
 // ── Agentic loop: call AI → check for TOOL → execute → repeat ─────────────
 async function agentLoop(messages, apiKey, model, sessionId, res, needsStudio) {
   const MAX_ROUNDS = 12;        // increased for complex multi-step workflows
@@ -591,7 +653,10 @@ async function agentLoop(messages, apiKey, model, sessionId, res, needsStudio) {
   let toolsExecuted = 0; // how many tools have actually run this turn
 
   for (let round = 0; round < MAX_ROUNDS; round++) {
-    const result = await streamWithCollection(messages, apiKey, model);
+    // Inject the per-phase directive as the final system message so the
+    // model always reads the current-phase instruction last.
+    const callMessages = buildCallMessages(messages, toolsExecuted);
+    const result = await streamWithCollection(callMessages, apiKey, model);
 
     if (!result || result.error) {
       writeSSE(res, {
@@ -641,16 +706,20 @@ async function agentLoop(messages, apiKey, model, sessionId, res, needsStudio) {
 
     // ── Tool call detected ────────────────────────────────────────────────
 
-    // Emit text before the TOOL: line (applies to ALL rounds, not just round 0)
+    // Only emit pre-tool text if it is a PLAN: line.
+    // Any other text before TOOL: is a hallucinated pre-execution claim
+    // (e.g. "I'll update your script.") and must be discarded — it appears
+    // to the user as success before the tool has even run.
     const toolMarkerIdx = text.indexOf('TOOL:');
-    const textBeforeTool = toolMarkerIdx > 0 ? text.slice(0, toolMarkerIdx).trim() : '';
+    const rawPreText = toolMarkerIdx > 0 ? text.slice(0, toolMarkerIdx).trim() : '';
+    const safePreText = rawPreText.startsWith('PLAN:') ? rawPreText : '';
 
     if (!headerSent) {
       writeSSE(res, { provider: 'OpenRouter', model: usedModel });
       headerSent = true;
     }
-    if (textBeforeTool) {
-      writeSSE(res, { content: textBeforeTool + '\n' });
+    if (safePreText) {
+      writeSSE(res, { content: safePreText + '\n' });
     }
 
     writeSSE(res, { content: `\n⚙️ *Ejecutando \`${toolCall.name}\`...*\n` });
