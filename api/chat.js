@@ -155,7 +155,10 @@ function buildSystemPrompt(session, needsStudio) {
     '    → Returns the Lua source code of the script at that path.',
     '',
     '  TOOL:{"name":"create_script","args":{"path":"ServerScriptService.MyScript","type":"Script","source":"-- lua code here"}}',
-    '    → Creates a new script. type can be Script, LocalScript, or ModuleScript.',
+    '    → Creates a new script. REQUIRED: path, type, source.',
+    '    → path MUST be "ParentService.ScriptName" — the parent container must already exist in Studio.',
+    '    → type must be exactly: Script | LocalScript | ModuleScript.',
+    '    → If unsure whether the parent exists, call get_tree first.',
     '',
     '  TOOL:{"name":"update_script","args":{"path":"ServerScriptService.MyScript","source":"-- new lua code"}}',
     '    → Overwrites the source of an existing script.',
@@ -176,7 +179,8 @@ function buildSystemPrompt(session, needsStudio) {
     '    → Changes properties. Typed values include Color3, Vector2, Vector3, UDim, UDim2, CFrame and Enum.',
     '',
     '  TOOL:{"name":"create_instance","args":{"parent":"StarterGui","name":"MainGui","className":"ScreenGui","properties":{"ResetOnSpawn":false},"children":[{"name":"Title","className":"TextLabel","properties":{"Text":"Welcome","Size":{"type":"UDim2","x":{"scale":0,"offset":300},"y":{"scale":0,"offset":60}}}}]}}',
-    '    → Creates an Instance and optional nested children.',
+    '    → Creates an Instance and optional nested children. REQUIRED: parent, name, className.',
+    '    → className must be a valid Roblox class name (e.g. ScreenGui, TextLabel, Part, Frame, RemoteEvent).',
     '',
     '  TOOL:{"name":"set_attributes","args":{"path":"Workspace.Part","attributes":{"ZenithManaged":true,"Role":"Spawn"}}}',
     '    → Sets custom Attributes on an Instance.',
@@ -307,6 +311,39 @@ function validateToolCall(toolName, args) {
   if (typeof args.source === 'string' && args.source.length > 100_000) {
     return `Source for "${toolName}" is too large (maximum 100,000 characters).`;
   }
+
+  // ── Tool-specific required fields ──────────────────────────────────────
+  // create_script: path must be "ParentService.ScriptName"; type is mandatory.
+  if (toolName === 'create_script') {
+    if (!args.path || typeof args.path !== 'string' || !args.path.trim()) {
+      return '"create_script" requires a "path" in the form "ParentService.ScriptName" (e.g. "ServerScriptService.MyScript").';
+    }
+    if (!args.path.includes('.')) {
+      return (
+        '"create_script" path must include the parent service: use "ParentService.ScriptName", not just "ScriptName". ' +
+        'The parent container (e.g. ServerScriptService) must already exist in Studio. ' +
+        'If unsure, call get_tree first to verify.'
+      );
+    }
+    const VALID_SCRIPT_TYPES = new Set(['Script', 'LocalScript', 'ModuleScript']);
+    if (!args.type || !VALID_SCRIPT_TYPES.has(args.type)) {
+      return '"create_script" requires "type" to be one of: Script, LocalScript, ModuleScript.';
+    }
+  }
+
+  // create_instance / create_ui_element: className is mandatory.
+  if (toolName === 'create_instance' || toolName === 'create_ui_element') {
+    if (!args.className || typeof args.className !== 'string' || !args.className.trim()) {
+      return `"${toolName}" requires a non-empty "className" (e.g. "ScreenGui", "TextLabel", "Part", "Frame").`;
+    }
+    if (!args.name || typeof args.name !== 'string' || !args.name.trim()) {
+      return `"${toolName}" requires a non-empty "name" for the new instance.`;
+    }
+    if (!args.parent || typeof args.parent !== 'string' || !args.parent.trim()) {
+      return `"${toolName}" requires a non-empty "parent" path where the instance will be created.`;
+    }
+  }
+
   return null;
 }
 
