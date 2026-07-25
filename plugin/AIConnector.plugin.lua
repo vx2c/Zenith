@@ -215,9 +215,67 @@ local function writeSource(target, source)
         end)
     end)
     if not ok then
-        return false, tostring(err)
+        local message = tostring(err)
+        local lowered = string.lower(message)
+        if string.find(lowered, "permission", 1, true)
+            or string.find(lowered, "inject", 1, true)
+            or string.find(lowered, "denied", 1, true) then
+            return false, "Roblox Studio denied Script Injection permission. "
+                .. "Allow it in Plugins > Manage Plugins, then retry. (" .. message .. ")"
+        end
+        return false, message
     end
     return true, nil
+end
+
+-- Roblox controls this permission in Plugin Management; a plugin cannot turn
+-- it on programmatically. This explicit probe lets the user ask Zenith to
+-- request the permission before creating real project scripts. The temporary
+-- ModuleScript is removed whether the request succeeds or fails.
+local function requestScriptInjectionPermission()
+    local parent = game:GetService("ServerScriptService")
+    local probe = nil
+    local ok, result = pcall(function()
+        probe = Instance.new("ModuleScript")
+        probe.Name = "__ZenithScriptPermissionProbe"
+        local wrote, writeError = writeSource(probe, "return true")
+        if not wrote then
+            return {
+                success = false,
+                error = writeError,
+                permission = "denied_or_not_granted",
+            }
+        end
+        -- Parenting a source container into the DataModel is the operation
+        -- Roblox protects with the Script Injection permission.
+        probe.Parent = parent
+        return {
+            success = true,
+            permission = "granted",
+        }
+    end)
+
+    local cleanupOk, cleanupError = pcall(function()
+        if probe then
+            probe:Destroy()
+        end
+    end)
+    if not ok then
+        return {
+            success = false,
+            error = tostring(result),
+            permission = "denied_or_not_granted",
+        }
+    end
+    if not cleanupOk then
+        return {
+            success = false,
+            error = "Permission probe succeeded, but cleanup failed: " .. tostring(cleanupError),
+            permission = "granted",
+        }
+    end
+    result.message = "Script Injection permission is available. The temporary probe was removed."
+    return result
 end
 
 -- Convert Roblox values into JSON-safe values for the web app.
@@ -606,6 +664,9 @@ local function executeCommandRaw(command)
     if commandType == "ping" then
         log("ping -> pong")
         return { success = true, value = "pong" }
+    elseif commandType == "request_script_injection" then
+        log("request_script_injection: checking Studio permission")
+        return requestScriptInjectionPermission()
     elseif commandType == "get_tree" then
         local root = args.path and resolveFull(args.path) or game
         if not root then
