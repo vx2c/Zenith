@@ -667,7 +667,10 @@ local function executeCommandRaw(command)
             if type(args.source) ~= "string" or args.source == "" then
                 return { success = false, error = "source is required for append_script" }
             end
-            local separator = source == "" or source:sub(-1) == "\n" and "" or "\n"
+            local separator = ""
+            if source ~= "" and source:sub(-1) ~= "\n" then
+                separator = "\n"
+            end
             source = source .. separator .. args.source
         end
         source = formatSource(source)
