@@ -1,33 +1,38 @@
-# Zenith
+# Zenith 
 
-Zenith is a Roblox Studio AI companion web app. It lets Roblox developers connect their Roblox account via OAuth and access an AI-powered dashboard for scripting, debugging, and workflow automation inside Roblox Studio.
+## About
+Zenith es un asistente de IA que funciona para integrarse a proyectos de roblox studios mediante un conector un plugin de roblox studios el plugin sirve para que zenith se pueda conectar a ese proyecto luego el plugin tira ping a la web para que zenith se conecte 
 
-## Architecture
+## Plugin Code
+El codigo del plugin de encuentra en plugin/IAConector.plugin.lua
 
-- **Frontend**: React + Vite app at `artifacts/zenith/` — serves the landing page and dashboard
-- **API Server**: Express 5 at `artifacts/api-server/` — handles the Roblox OAuth token exchange
-- **Shared libs**: `lib/api-spec/` (OpenAPI), `lib/api-client-react/` (generated hooks), `lib/api-zod/` (Zod schemas)
+## Important Folders 
 
-## Roblox OAuth
+## Folder 1 -> api - > este folder contiene aiService.js / avatar.js / chat.js / command_result.js / config.js / connect.js / debug-models.js / heartbeat.js / plugin-status.js / queue-command.js / roblox-callback.js / session-store.js / status.js 
 
-The app uses Roblox OAuth 2.0 (openid + profile scopes).
+## Folder 2 -> artifacts / api-serve / mockup-sandbox / zenith 
 
-- Public CLIENT_ID `4229742603179424213` is hardcoded in the frontend (safe — it's a public identifier)
-- `ROBLOX_CLIENT_ID` and `ROBLOX_CLIENT_SECRET` must be set as Replit Secrets for the API server to exchange codes for tokens
-- OAuth redirect URI: `<origin>/roblox-callback`
+## Folder 3 -> lib / api-client-react / api-spec / api-zod / db
 
-## Key routes
+## Folder 4 -> scripts / src / 3 files -> package.json / post-merge.sh / tsconfig.json
 
-- `/` — Landing page (unauthenticated) or Dashboard (authenticated via localStorage `roblox_user_name`)
-- `/roblox-callback` — OAuth callback handler page
-- `/api/roblox-callback` (POST) — Token exchange endpoint in the API server
+## Folder 5 .migration-backup 🡳 🡳 🡳
+ 
+ api
+ docs
+.gitignore
+.replit
+.scaffold-applied
+README.md
+index.html
+package.json
+roblox-callback.html
+script.js
+style.css
+vercel.json
 
-## Running
+# Web Function 
+Para la web es un flujo - Modificar \ https://github.com/vx2c/Zenith - commit or push git / Hacer esto vercel recibe esos commits y actualiza - https://xzenith.vercel.app \ 
+siempre un orden 
 
-Workflows are managed by Replit:
-- `artifacts/zenith: web` — Vite dev server (frontend)
-- `artifacts/api-server: API Server` — Express backend
-
-## User preferences
-
-- Preserve original Zenith monochrome palette: `#111111` primary, `#f6f6f6` background, frosted-glass cards
+# 
