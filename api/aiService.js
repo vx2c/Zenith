@@ -11,16 +11,15 @@ const SITE_URL        = process.env.SITE_URL || 'https://xzenith.vercel.app';
 const SITE_NAME       = 'Zenith - Roblox Studio AI';
 
 // ── Model registry ───────────────────────────
-// openrouter/free = OpenRouter's own auto-router: picks the best available
-// free model at request time, bypassing individual model rate limits.
-// Listed after: verified free-tier models from OpenRouter /api/v1/models.
+// Keep this list limited to model IDs that are present in OpenRouter's
+// /api/v1/models catalog. An invalid first model makes the fallback path
+// look broken even when the API key is healthy.
 const FALLBACK_CHAIN = [
-  'openrouter/free',                     // auto-router — always tries something
-  'google/gemma-4-26b-a4b-it:free',     // MoE: ~4B active params, fastest
-  'nvidia/nemotron-nano-9b-v2:free',    // 9B nano, very fast
-  'openai/gpt-oss-20b:free',            // 20B, good quality
-  'google/gemma-4-31b-it:free',         // 31B dense, quality fallback
   'cohere/north-mini-code:free',        // code-specialist (great for Lua)
+  'google/gemma-4-26b-a4b-it:free',     // general-purpose fallback
+  'openai/gpt-oss-20b:free',             // larger general-purpose fallback
+  'poolside/laguna-m.1:free',            // coding fallback
+  'nvidia/nemotron-nano-9b-v2:free',     // fast fallback
 ];
 
 const DEFAULT_MODEL = FALLBACK_CHAIN[0];
