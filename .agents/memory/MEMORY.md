@@ -1,1 +1,2 @@
 - [Deployment boundary](deployment-boundary.md) — Vercel production uses the root frontend and `api/` functions, separate from the Replit artifact apps.
+- [GitHub publishing](github-publishing.md) — use the authorized GitHub push helper when the local HTTPS remote lacks CLI credentials.
