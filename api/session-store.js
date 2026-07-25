@@ -25,12 +25,10 @@ const SESSION_TTL = 300;
  */
 async function redisCmd(...args) {
   if (!REDIS_URL || !REDIS_TOKEN) {
-    // Graceful degradation: warn and return null so the app doesn't crash.
-    console.error(
-      '[session-store] Upstash Redis not configured. ' +
-      'Set UPSTASH_REDIS_REST_URL and UPSTASH_REDIS_REST_TOKEN in Vercel.'
+    throw new Error(
+      'Upstash Redis is not configured. Set UPSTASH_REDIS_REST_URL and ' +
+      'UPSTASH_REDIS_REST_TOKEN in the Vercel project.'
     );
-    return null;
   }
   const res = await fetch(REDIS_URL, {
     method:  'POST',
@@ -40,7 +38,13 @@ async function redisCmd(...args) {
     },
     body: JSON.stringify(args),
   });
+  if (!res.ok) {
+    throw new Error(`Upstash Redis returned HTTP ${res.status}`);
+  }
   const json = await res.json();
+  if (json.error) {
+    throw new Error(`Upstash Redis error: ${json.error}`);
+  }
   return json.result ?? null;
 }
 
@@ -98,6 +102,13 @@ async function getActiveSessions() {
     body: JSON.stringify(pipeline),
   });
   const results = await res.json();
+  if (!res.ok || !Array.isArray(results)) {
+    throw new Error(`Upstash Redis pipeline returned HTTP ${res.status}`);
+  }
+  const pipelineError = results.find(r => r && r.error);
+  if (pipelineError) {
+    throw new Error(`Upstash Redis pipeline error: ${pipelineError.error}`);
+  }
   return results
     .map(r => r.result)
     .filter(Boolean)

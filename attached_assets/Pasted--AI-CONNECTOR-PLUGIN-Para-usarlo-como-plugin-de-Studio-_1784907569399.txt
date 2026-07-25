@@ -18,6 +18,8 @@ local MAX_HEARTBEAT_FAILURES = 3 -- fallos seguidos antes de desconectar
 -- SERVICIOS
 -- ============================================
 local HttpService = game:GetService("HttpService")
+local ScriptEditorService = game:GetService("ScriptEditorService")
+local ChangeHistoryService = game:GetService("ChangeHistoryService")
 
 -- ============================================
 -- CREAR TOOLBAR Y BOTON
@@ -134,6 +136,13 @@ local function log(msg)
     print("[AI Connector] " .. msg)
 end
 
+local function normalizePath(path)
+    path = tostring(path or "")
+    path = path:gsub("^%s+", ""):gsub("%s+$", "")
+    path = path:gsub("^game%.", "")
+    return path
+end
+
 local function updateUI(connected)
     if connected then
         StatusLabel.Text = "Connected"
@@ -153,6 +162,7 @@ end
 -- ============================================
 local function resolvePath(path)
     -- Divide "ServerScriptService.Folder.Script" en partes
+    path = normalizePath(path)
     local parts = string.split(path, ".")
     local current = game
     for i = 1, #parts - 1 do
@@ -176,6 +186,7 @@ end
 
 local function resolveFull(path)
     -- Navega el path completo y devuelve el objeto final
+    path = normalizePath(path)
     local parts = string.split(path, ".")
     local current = game
     for i, part in ipairs(parts) do
@@ -192,6 +203,25 @@ local function resolveFull(path)
         if not current then break end
     end
     return current
+end
+
+-- Roblox Studio's supported plugin API for editing source is
+-- ScriptEditorService:UpdateSourceAsync. Direct assignment to .Source can
+-- fail when the script is open or when Studio's source security checks apply.
+local function writeSource(target, source)
+    if not target or not target:IsA("LuaSourceContainer") then
+        return false, "Target is not a LuaSourceContainer"
+    end
+
+    local ok, err = pcall(function()
+        ScriptEditorService:UpdateSourceAsync(target, function()
+            return source
+        end)
+    end)
+    if not ok then
+        return false, tostring(err)
+    end
+    return true, nil
 end
 
 -- ============================================
@@ -217,7 +247,7 @@ local function executeCommand(cmd)
         return { services = services }
     
     elseif cmd.type == "read_script" then
-        local path = args.path
+        local path = normalizePath(args.path)
         if not path then
             return { error = "Missing 'path' in args" }
         end
@@ -225,14 +255,14 @@ local function executeCommand(cmd)
         if not target then
             return { error = "Not found: " .. path }
         end
-        if not target:IsA("BaseScript") and not target:IsA("ModuleScript") then
+        if not target:IsA("LuaSourceContainer") then
             return { error = "Not a script: " .. path }
         end
         log("read_script: " .. path)
         return { source = target.Source }
     
     elseif cmd.type == "create_script" then
-        local path = args.path
+        local path = normalizePath(args.path)
         local scriptType = args.type or "Script"
         local source = args.source or ""
         if not path then
@@ -250,13 +280,20 @@ local function executeCommand(cmd)
         -- Crear el script
         local newScript = Instance.new(scriptType)
         newScript.Name = name
-        newScript.Source = source
         newScript.Parent = parent
+        local wrote, writeError = writeSource(newScript, source)
+        if not wrote then
+            newScript:Destroy()
+            return { success = false, error = "Could not write script source: " .. writeError }
+        end
+        pcall(function()
+            ChangeHistoryService:SetWaypoint("Zenith create_script " .. path)
+        end)
         log("create_script: " .. path .. " (" .. scriptType .. ")")
-        return { path = newScript:GetFullName(), name = newScript.Name }
+        return { success = true, path = newScript:GetFullName(), name = newScript.Name }
     
     elseif cmd.type == "update_script" then
-        local path = args.path
+        local path = normalizePath(args.path)
         local source = args.source or ""
         if not path then
             return { error = "Missing 'path' in args" }
@@ -265,10 +302,16 @@ local function executeCommand(cmd)
         if not target then
             return { error = "Not found: " .. path }
         end
-        if not target:IsA("BaseScript") and not target:IsA("ModuleScript") then
+        if not target:IsA("LuaSourceContainer") then
             return { error = "Not a script: " .. path }
         end
-        target.Source = source
+        local wrote, writeError = writeSource(target, source)
+        if not wrote then
+            return { success = false, error = "Could not write script source: " .. writeError }
+        end
+        pcall(function()
+            ChangeHistoryService:SetWaypoint("Zenith update_script " .. path)
+        end)
         log("update_script: " .. path)
         return { success = true }
     end
@@ -328,8 +371,17 @@ local function startHeartbeat()
                     return HttpService:JSONDecode(response.Body)
                 end)
                 
-                if ok and data and data.commands then
+                if not ok then
+                    log("Invalid heartbeat JSON: " .. tostring(data))
+                elseif data and data.reconnect then
+                    log("Session expired - reconnecting")
+                    isConnected = false
+                    heartbeatRunning = false
+                    sessionId = nil
+                    updateUI(false)
+                elseif data and data.commands then
                     for _, cmd in ipairs(data.commands) do
+                        log("Received command " .. tostring(cmd.id) .. ": " .. tostring(cmd.type))
                         -- Ejecutar el comando
                         local pcallSuccess, pcallResult = pcall(function()
                             return executeCommand(cmd)
@@ -347,13 +399,14 @@ local function startHeartbeat()
                         end
                         
                         -- Enviar resultado al servidor
-                        pcall(function()
-                            sendRequest("/command_result", {
+                        local resultSent, resultResponse = sendRequest("/command_result", {
                                 id = cmd.id,
                                 result = cmdResult,
                                 error = cmdError
                             })
-                        end)
+                        if not resultSent or not resultResponse.Success then
+                            log("Result upload failed for " .. tostring(cmd.id))
+                        end
                     end
                 end
             end

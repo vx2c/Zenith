@@ -64,6 +64,7 @@ function buildSystemPrompt(session) {
     '3. The system will execute the tool and inject the result. Then you continue.',
     '4. NEVER say "I created X" without having used the create_script tool first.',
     '5. NEVER tell the user to do something manually if a tool can do it.',
+    '6. Treat TOOL_RESULT as authoritative: if it contains an error or success=false, explain the failure and never claim the change succeeded.',
   ].filter(Boolean).join('\n');
 
   return base + studioContext;
@@ -79,6 +80,16 @@ async function executeStudioTool(sessionId, toolName, args) {
     const result = await getResult(commandId);
     if (result !== null) {
       if (result.error) return { error: result.error };
+      // The plugin historically returned execution failures as
+      // { result: { error: "..." }, error: null }. Treat that as a failure,
+      // otherwise the UI falsely reports "Listo" and the agent continues as
+      // if Roblox Studio was changed.
+      if (result.result && typeof result.result === 'object') {
+        if (result.result.error) return { error: result.result.error };
+        if (result.result.success === false) {
+          return { error: result.result.message || 'Studio command failed.' };
+        }
+      }
       return result.result ?? result;
     }
     await new Promise(r => setTimeout(r, 500));
@@ -311,7 +322,11 @@ async function agentLoop(messages, apiKey, model, sessionId, res) {
     // Execute the tool
     const toolResult = await executeStudioTool(sessionId, toolCall.name, toolCall.args || {});
 
-    writeSSE(res, { content: `✅ *Listo.*\n\n` });
+    if (toolResult && toolResult.error) {
+      writeSSE(res, { content: `❌ *Error en Studio:* ${toolResult.error}\n\n` });
+    } else {
+      writeSSE(res, { content: `✅ *Listo.*\n\n` });
+    }
 
     // Inject the result back into the conversation
     messages = [
@@ -359,6 +374,15 @@ module.exports = async function handler(req, res) {
   // ── Studio connected: use agentic tool loop ───────────────────────────
   if (sessionId) {
     const session = await getSession(sessionId);
+    // Never enter the agentic branch with an unknown session. A stale browser
+    // session must not make the model emit TOOL: text that cannot execute.
+    if (!session) {
+      writeSSE(res, {
+        error: 'Studio session expired. Reconnect the plugin before asking Zenith to edit the project.',
+      });
+      writeSSE(res, { done: true });
+      return res.end();
+    }
     const systemPrompt = buildSystemPrompt(session);
 
     const openAIMessages = [
@@ -381,7 +405,8 @@ module.exports = async function handler(req, res) {
         'You are Zenith, an expert AI assistant for Roblox Studio development. ' +
         'You help developers write Lua scripts, debug code, generate GUIs, ' +
         'analyze Explorer hierarchies, and automate workflows inside Roblox Studio. ' +
-        'No Studio plugin is connected right now, so you can only give advice and code.',
+        'No Studio plugin is connected right now, so you can only give advice and code. ' +
+        'Do not output TOOL: lines or claim that you changed the project.',
     },
     ...messages.map(m => ({
       role:    m.role === 'ai' ? 'assistant' : 'user',

@@ -9,7 +9,11 @@ module.exports = async function handler(req, res) {
   if (req.method !== 'GET')    return res.status(405).end();
   res.setHeader('Cache-Control', 'no-cache');
 
-  const sessions = await getActiveSessions();
+  // Prefer the Studio instance that most recently heartbeated. This keeps a
+  // stale/old Studio window from receiving a new command when several
+  // sessions exist.
+  const sessions = (await getActiveSessions())
+    .sort((a, b) => (b.lastSeen || 0) - (a.lastSeen || 0));
   const connected = sessions.length > 0;
 
   return res.status(200).json({

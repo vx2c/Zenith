@@ -32,7 +32,8 @@ module.exports = async function handler(req, res) {
 
   let targetSession = sessionId;
   if (!targetSession) {
-    const active = await getActiveSessions();
+    const active = (await getActiveSessions())
+      .sort((a, b) => (b.lastSeen || 0) - (a.lastSeen || 0));
     if (!active.length) return res.status(404).json({ error: 'No plugin connected' });
     targetSession = active[0].sessionId;
   }

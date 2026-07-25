@@ -20,6 +20,7 @@ const state = {
   modeSearch:   false,
   activePanel:  'home',
   pluginToken:  null,   // signed session token from active Studio plugin
+  pluginStatusReady: false,
 };
 
 // ── Storage ──────────────────────────────────
@@ -443,6 +444,14 @@ async function sendMsg(content) {
   state.responding = true;
   state.abortCtrl  = new AbortController();
 
+  // initApp starts the status poll asynchronously. Wait for its first
+  // response so the first message cannot accidentally enter plainStream while
+  // Studio is already connected.
+  const statusDeadline = Date.now() + 5000;
+  while (!state.pluginStatusReady && Date.now() < statusDeadline) {
+    await new Promise(resolve => setTimeout(resolve, 100));
+  }
+
   // Chip detection
   const chip = detectChip(content);
 
@@ -754,7 +763,8 @@ async function loadPluginStatus() {
     const data = await r.json();
 
     const session   = data.sessions?.[0] ?? null;
-    // Use the signed token — self-verifiable on any Vercel instance (no shared memory needed)
+    // The current backend uses Redis session IDs. Keep token support for
+    // older plugin builds, but never send null into an edit request.
     state.pluginToken = session?.token ?? session?.sessionId ?? null;
     console.log("PLUGIN SESSION:", session);
 
@@ -778,7 +788,14 @@ async function loadPluginStatus() {
       label.textContent = 'No Studio';
       if (meta) meta.textContent = '';
     }
-  } catch { /* non-fatal */ }
+  } catch {
+    // Do not keep sending a stale session ID after the status endpoint fails.
+    // The next poll will restore it when the plugin is reachable again.
+    state.pluginToken = null;
+  }
+  finally {
+    state.pluginStatusReady = true;
+  }
 
   setTimeout(loadPluginStatus, 4_000);
 }
