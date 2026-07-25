@@ -1,43 +1,8 @@
 {
-  "version": 2,
-  "installCommand": "echo skip",
-  "buildCommand": "echo skip",
-  "outputDirectory": ".",
+  "buildCommand": "pnpm install && pnpm --filter @workspace/zenith run build",
+  "outputDirectory": "artifacts/zenith/dist/public",
   "framework": null,
-  "functions": {
-    "api/chat.js":   { "maxDuration": 60 },
-    "api/studio.js": { "maxDuration": 10 },
-    "api/system.js": { "maxDuration": 30 }
-  },
-  "headers": [
-    {
-      "source": "/api/(.*)",
-      "headers": [
-        { "key": "Access-Control-Allow-Origin",  "value": "*" },
-        { "key": "Access-Control-Allow-Methods", "value": "GET, POST, OPTIONS" },
-        { "key": "Access-Control-Allow-Headers", "value": "Content-Type" }
-      ]
-    }
-  ],
   "rewrites": [
-    { "source": "/roblox-callback",      "destination": "/roblox-callback.html" },
-
-    { "source": "/api/connect",          "destination": "/api/studio?_r=connect" },
-    { "source": "/api/heartbeat",        "destination": "/api/studio?_r=heartbeat" },
-    { "source": "/api/command_result",   "destination": "/api/studio?_r=command_result" },
-    { "source": "/api/plugin-status",    "destination": "/api/studio?_r=plugin-status" },
-    { "source": "/api/queue-command",    "destination": "/api/studio?_r=queue-command" },
-    { "source": "/api/avatar",           "destination": "/api/studio?_r=avatar" },
-
-    { "source": "/api/config",           "destination": "/api/system?_r=config" },
-    { "source": "/api/status",           "destination": "/api/system?_r=status" },
-    { "source": "/api/debug-models",     "destination": "/api/system?_r=debug-models" },
-    { "source": "/api/roblox-callback",  "destination": "/api/system?_r=roblox-callback" },
-
-    { "source": "/connect",              "destination": "/api/studio?_r=connect" },
-    { "source": "/heartbeat",            "destination": "/api/studio?_r=heartbeat" },
-    { "source": "/command_result",       "destination": "/api/studio?_r=command_result" },
-    { "source": "/plugin-status",        "destination": "/api/studio?_r=plugin-status" },
-    { "source": "/queue-command",        "destination": "/api/studio?_r=queue-command" }
+    { "source": "/((?!api/).*)", "destination": "/index.html" }
   ]
 }
