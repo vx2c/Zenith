@@ -268,6 +268,23 @@ local function numberOr(value, fallback)
     return number
 end
 
+local function decodeUDimAxis(axis)
+    if type(axis) == "number" or type(axis) == "string" then
+        -- Compact AI format: x = 300 means offset 300, scale 0.
+        return 0, numberOr(axis, 0)
+    end
+    if type(axis) ~= "table" then
+        return 0, 0
+    end
+    -- Full format: x = { scale = 0, offset = 300 }.
+    -- Also accept common aliases emitted by models.
+    local scale = axis.scale
+    if scale == nil then scale = axis.Scale end
+    local offset = axis.offset
+    if offset == nil then offset = axis.Offset end
+    return numberOr(scale, 0), numberOr(offset, 0)
+end
+
 -- Accept explicit typed JSON values and convert them to Roblox datatypes.
 local function decodeValue(value, currentValue)
     if type(value) ~= "table" then
@@ -289,11 +306,11 @@ local function decodeValue(value, currentValue)
     elseif valueType == "UDim" then
         return UDim.new(numberOr(value.scale, 0), numberOr(value.offset, 0))
     elseif valueType == "UDim2" then
-        local x = value.x or {}
-        local y = value.y or {}
+        local xScale, xOffset = decodeUDimAxis(value.x or value.X)
+        local yScale, yOffset = decodeUDimAxis(value.y or value.Y)
         return UDim2.new(
-            numberOr(x.scale, 0), numberOr(x.offset, 0),
-            numberOr(y.scale, 0), numberOr(y.offset, 0)
+            xScale, xOffset,
+            yScale, yOffset
         )
     elseif valueType == "CFrame" and type(value.components) == "table" then
         return CFrame.new(table.unpack(value.components))
