@@ -44,6 +44,36 @@ const SUPPORTED_STUDIO_TOOLS = new Set([
   'summarize_project',
 ]);
 
+// ── Intent classifier ──────────────────────────────────────────────────────
+// Returns true when the user's last message clearly requires executing a
+// Studio action — not just asking for advice or code examples.
+
+const STUDIO_ACTION_PATTERNS = [
+  // Mutation verbs
+  /\b(crea[r]?|agrega[r]?|a[ñn]ade|añadir|insertar|haz|make|create|add|insert|build)\b/i,
+  /\b(modifica[r]?|cambia[r]?|edita[r]?|actualiza[r]?|modify|change|edit|update|rename|rename)\b/i,
+  /\b(elimina[r]?|borra[r]?|quita[r]?|delete|remove|destroy|clear)\b/i,
+  /\b(mueve[r]?|clona[r]?|copi[ae][r]?|move|clone|copy|duplicate)\b/i,
+  // Read verbs targeting the live project
+  /\b(lee[r]?|muéstrame|muestra|dame|obtén|obtener|ver|mira[r]?)\s+(el|la|los|las|mi|mis|el\s+código|el\s+script|el\s+árbol|el\s+explorer)/i,
+  /\b(read|show\s+me|get|fetch|inspect|list)\s+(my|the|current|all)\b.*\b(script|tree|explorer|instance|part|gui|folder|remote)/i,
+  // Direct project references
+  /\b(en\s+(studio|el\s+proyecto|mi\s+proyecto|workspace|roblox)|in\s+(studio|my\s+project|workspace|roblox\s+studio))\b/i,
+  /\b(el\s+árbol|el\s+explorer|el\s+explorador|mi\s+juego|mi\s+proyecto)\b/i,
+  /\b(the\s+(explorer|tree|workspace|game|project|place))\b/i,
+  // Common Roblox nouns that imply project context
+  /\b(ServerScriptService|StarterGui|ReplicatedStorage|Workspace|StarterPlayer|SoundService|Teams|Players)\b/,
+  // Inspect / debug
+  /\b(qué\s+hay|qué\s+tiene|qué\s+contiene|what('s|\s+is)\s+in|show\s+the|inspect|debug\s+my)\b/i,
+];
+
+function detectStudioIntent(messages) {
+  const last = messages[messages.length - 1];
+  if (!last || last.role !== 'user') return false;
+  const text = last.content || '';
+  return STUDIO_ACTION_PATTERNS.some(re => re.test(text));
+}
+
 function parseJsonBody(req) {
   return new Promise((resolve, reject) => {
     let body = '';
@@ -62,7 +92,7 @@ function writeSSE(res, obj) {
 }
 
 // ── System prompt ──────────────────────────────────────────────────────────
-function buildSystemPrompt(session) {
+function buildSystemPrompt(session, needsStudio) {
   const base =
     'You are Zenith, an expert AI assistant for Roblox Studio development. ' +
     'You help developers write Lua scripts, debug code, generate GUIs, ' +
@@ -73,6 +103,10 @@ function buildSystemPrompt(session) {
 
   if (!session) return base;
 
+  const intentNote = needsStudio
+    ? '\n\n⚠️  INTENT DETECTED: The developer is asking for a Studio action. You MUST use a tool before responding. Do NOT describe the action, explain it, or write code first. Execute the tool immediately.'
+    : '';
+
   const studioContext = [
     '\n\n--- STUDIO CONNECTED ---',
     session.placeId   ? `Place ID: ${session.placeId}` : '',
@@ -80,16 +114,30 @@ function buildSystemPrompt(session) {
     session.placeName ? `Place: ${session.placeName}` : '',
     '',
     'You have REAL tools to interact with the developer\'s Roblox Studio project.',
-    'When the developer asks you to read or create or modify anything in their project,',
-    'you MUST use the tool system below. NEVER describe an action without performing it first.',
+    'When the developer asks you to read, create, or modify anything in their project,',
+    'you MUST use the tool system below. NEVER describe, simulate, or imagine an action.',
     '',
     'TOOL SYSTEM:',
     'To call a tool, output a line that looks exactly like this (nothing else on that line):',
     '  TOOL:{"name":"tool_name","args":{...}}',
     '',
-    'Available tools (every command runs in Roblox Studio and returns success/data/error):',
+    'CRITICAL TOOL EXECUTION RULES:',
+    '  T1. If the developer asks to create, edit, read, or inspect anything in Studio → use the right tool IMMEDIATELY.',
+    '  T2. After outputting TOOL:{...}, STOP. Do NOT continue writing. Wait for TOOL_RESULT.',
+    '  T3. Never output TOOL:{...} more than once per response. One tool call per response.',
+    '  T4. TOOL_RESULT is the only source of truth. Never invent or guess the result.',
+    '  T5. If TOOL_RESULT contains success=false or an "error" field → explain the failure. Never claim success.',
+    '  T6. If TOOL_RESULT is successful, then and ONLY then describe what was done.',
+    '  T7. Never tell the user to do something manually if a tool can do it.',
+    '  T8. For questions about the project (tree, scripts, GUIs), call get_tree or find_instances first.',
+    '  T9. Before the first mutating call, output one line starting with "PLAN:" listing the steps.',
+    ' T10. Never delete or overwrite content unless the user explicitly asked for that exact change.',
+    ' T11. Never invent Roblox property values, paths, or class names you haven\'t read from TOOL_RESULT.',
+    '',
+    'Available tools:',
     '  TOOL:{"name":"ping","args":{}}',
     '    → Checks that the connected Studio plugin is responding.',
+    '',
     '  TOOL:{"name":"get_tree","args":{}}',
     '    → Returns the recursive Explorer tree. Optional args: path, maxDepth, maxNodes.',
     '    Example: TOOL:{"name":"get_tree","args":{"path":"Workspace","maxDepth":4}}',
@@ -126,7 +174,7 @@ function buildSystemPrompt(session) {
     '    → Changes properties. Typed values include Color3, Vector2, Vector3, UDim, UDim2, CFrame and Enum.',
     '',
     '  TOOL:{"name":"create_instance","args":{"parent":"StarterGui","name":"MainGui","className":"ScreenGui","properties":{"ResetOnSpawn":false},"children":[{"name":"Title","className":"TextLabel","properties":{"Text":"Welcome","Size":{"type":"UDim2","x":{"scale":0,"offset":300},"y":{"scale":0,"offset":60}}}}]}}',
-    '    → Creates an Instance and optional nested children. Prefer parent + name; full path "StarterGui.MainGui" is also accepted.',
+    '    → Creates an Instance and optional nested children.',
     '',
     '  TOOL:{"name":"set_attributes","args":{"path":"Workspace.Part","attributes":{"ZenithManaged":true,"Role":"Spawn"}}}',
     '    → Sets custom Attributes on an Instance.',
@@ -140,7 +188,7 @@ function buildSystemPrompt(session) {
     '    → Clones an existing Instance and its descendants into another parent.',
     '',
     '  TOOL:{"name":"delete_instance","args":{"path":"Workspace.OldPart","confirm":true}}',
-    '    → Deletes an Instance only when the user explicitly requested it and confirm is true. Never use speculatively.',
+    '    → Deletes an Instance. Only when user explicitly requested deletion and confirm is true.',
     '',
     '  TOOL:{"name":"create_folder","args":{"parent":"ReplicatedStorage","name":"Systems"}}',
     '    → Creates a Folder.',
@@ -163,11 +211,11 @@ function buildSystemPrompt(session) {
     '    → Creates a RemoteFunction.',
     '',
     '  TOOL:{"name":"get_output_logs","args":{"maxResults":100}}',
-    '    → Reads the Studio output history exposed by LogService.',
+    '    → Reads the Studio output/log history.',
     '  TOOL:{"name":"clear_output","args":{}}',
-    '    → Attempts the Studio clear-output API and reports if Roblox does not expose it.',
+    '    → Clears the Studio output.',
     '  TOOL:{"name":"save_place","args":{}}',
-    '    → Attempts the Studio save API and reports its actual result.',
+    '    → Saves the current place in Studio.',
     '  TOOL:{"name":"analyze_project","args":{}}',
     '    → Inspects live tree and scripts for common systems.',
     '  TOOL:{"name":"summarize_project","args":{}}',
@@ -175,53 +223,56 @@ function buildSystemPrompt(session) {
     '  TOOL:{"name":"detect_systems","args":{}}',
     '    → Detects Leaderstats, DataStores, RemoteEvents, GUIs, rounds, combat, and inventory.',
     '',
-    'RULES:',
-    '1. If the user asks to create, edit, read, or inspect anything in Studio → use the right tool.',
-    '2. After outputting TOOL:{...}, STOP and wait. Do NOT continue the response.',
-    '3. The system will execute the tool and inject the result. Then you continue.',
-    '4. Before the first mutating tool call, briefly output a line beginning with "PLAN:" and list the intended steps.',
-    '5. Use only the exact tool names listed above. Never invent a tool or a Roblox API call as a TOOL.',
-    '6. NEVER say "I created X" without having used the create_script tool first.',
-    '7. NEVER tell the user to do something manually if a tool can do it.',
-    '8. Treat TOOL_RESULT as authoritative: if it contains an error or success=false, explain the failure and never claim the change succeeded.',
-    '9. For broad project questions, call get_tree or find_instances before making assumptions.',
-    '10. Use create_instance with nested children to build complete GUIs in one verified operation.',
-    '11. Never delete or overwrite user content unless the user explicitly asks for that exact change.',
+    'HALLUCINATION PREVENTION:',
+    '  - You have NEVER seen this developer\'s project before unless a TOOL_RESULT shows it.',
+    '  - Do not assume any script exists, any instance exists, or any path is valid.',
+    '  - Every fact about the project must come from a TOOL_RESULT in this conversation.',
+    '  - If you are unsure whether something exists, use find_instances or get_tree to check.',
+    '  - NEVER say "I created X", "I added Y", or "Done" without a successful TOOL_RESULT confirming it.',
   ].filter(Boolean).join('\n');
 
-  return base + studioContext;
+  return base + intentNote + studioContext;
 }
 
 // ── Execute one Studio command via the plugin ──────────────────────────────
-async function executeStudioTool(sessionId, toolName, args) {
+async function executeStudioTool(sessionId, toolName, args, { timeoutMs = 12000, retries = 1 } = {}) {
   const validationError = validateToolCall(toolName, args);
   if (validationError) return { error: validationError };
 
-  const commandId = await enqueueCommand(sessionId, toolName, args || {});
-  if (!commandId) return { error: 'Session expired — plugin disconnected.' };
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    const commandId = await enqueueCommand(sessionId, toolName, args || {});
+    if (!commandId) return { error: 'Session expired — plugin disconnected.' };
 
-  const deadline = Date.now() + 10000;
-  while (Date.now() < deadline) {
-    const result = await getResult(commandId);
-    if (result !== null) {
-      if (result.error) return { error: result.error };
-      // The plugin historically returned execution failures as
-      // { result: { error: "..." }, error: null }. Treat that as a failure,
-      // otherwise the UI falsely reports "Listo" and the agent continues as
-      // if Roblox Studio was changed.
-      if (result.result && typeof result.result === 'object') {
-        if (result.result.error) return { error: result.result.error };
-        if (result.result.success === false) {
-          return { error: result.result.error || result.result.message || 'Studio command failed.' };
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      const result = await getResult(commandId);
+      if (result !== null) {
+        // Normalise nested error patterns
+        if (result.error) return { error: result.error };
+        if (result.result && typeof result.result === 'object') {
+          if (result.result.error) return { error: result.result.error };
+          if (result.result.success === false) {
+            return { error: result.result.error || result.result.message || 'Studio command failed.' };
+          }
+        } else if (result.success === false) {
+          return { error: result.error || result.message || 'Studio command failed.' };
         }
-      } else if (result.success === false) {
-        return { error: result.error || result.message || 'Studio command failed.' };
+        return result.result ?? result;
       }
-      return result.result ?? result;
+      await new Promise(r => setTimeout(r, 400));
     }
-    await new Promise(r => setTimeout(r, 500));
+
+    // On timeout, retry once before giving up
+    if (attempt < retries) {
+      console.warn(`[chat] tool ${toolName} timeout on attempt ${attempt + 1}, retrying...`);
+    }
   }
-  return { error: 'Studio plugin did not respond in 10s. Make sure Studio is open and the plugin is connected.' };
+
+  return {
+    error:
+      'Studio plugin did not respond within the timeout. ' +
+      'Make sure Roblox Studio is open, the plugin is connected, and the place is loaded.',
+  };
 }
 
 function validateToolCall(toolName, args) {
@@ -258,18 +309,13 @@ function validateToolCall(toolName, args) {
 }
 
 // ── Parse TOOL:{...} lines from AI text output ─────────────────────────────
+// Counts braces so nested JSON objects are handled correctly.
 function extractToolCall(text) {
-  // Find "TOOL:" then extract a balanced JSON object.
-  // The old regex /TOOL:\s*(\{[\s\S]*?\})/ was non-greedy and stopped at
-  // the FIRST closing brace, breaking any tool call whose args contain nested
-  // JSON objects (e.g. create_script with an args object). This parser counts
-  // braces so it always finds the correct closing brace.
   const prefix = 'TOOL:';
   const idx = text.indexOf(prefix);
   if (idx === -1) return null;
 
   let start = idx + prefix.length;
-  // Skip optional whitespace between "TOOL:" and "{"
   while (start < text.length && /\s/.test(text[start])) start++;
   if (text[start] !== '{') return null;
 
@@ -291,7 +337,7 @@ function extractToolCall(text) {
     }
   }
 
-  if (end === -1) return null; // unbalanced braces — AI truncated the JSON
+  if (end === -1) return null;
 
   const jsonStr = text.slice(start, end + 1);
   try {
@@ -352,7 +398,6 @@ async function streamWithCollection(messages, apiKey, model) {
           if (!raw || raw === '[DONE]') continue;
           try {
             const chunk = JSON.parse(raw);
-            // OpenRouter sometimes returns HTTP 200 but with an error in the body
             if (chunk.error) {
               streamError = `${chunk.error.message || JSON.stringify(chunk.error)} (code ${chunk.error.code || '?'})`;
               break;
@@ -375,22 +420,24 @@ async function streamWithCollection(messages, apiKey, model) {
     console.warn(`[chat/collect] model ${m} returned empty content — trying next`);
     failures.push(`${m}: empty response`);
   }
+
   const allRateLimited =
-    failures.length > 0 && failures.every(failure => failure.includes(': HTTP 429'));
+    failures.length > 0 && failures.every(f => f.includes(': HTTP 429'));
   if (allRateLimited) {
     return {
       error:
-        'OpenRouter is rate-limiting every free model for this account (HTTP 429). ' +
-        'Wait for the daily limit to reset or add OpenRouter credits to unlock more requests.',
+        'OpenRouter is rate-limiting every free model (HTTP 429). ' +
+        'Wait for the daily limit to reset or add OpenRouter credits.',
     };
   }
   return { error: failures.join('; ') || 'no model response' };
 }
 
 // ── Stream pre-built text to client via SSE ────────────────────────────────
-function streamTextToClient(res, model, text) {
-  writeSSE(res, { provider: 'OpenRouter', model });
-  // Stream in small chunks so the UI feels alive
+function streamTextToClient(res, model, text, { headerAlreadySent = false } = {}) {
+  if (!headerAlreadySent) {
+    writeSSE(res, { provider: 'OpenRouter', model });
+  }
   const CHUNK = 40;
   for (let i = 0; i < text.length; i += CHUNK) {
     writeSSE(res, { content: text.slice(i, i + CHUNK) });
@@ -400,7 +447,6 @@ function streamTextToClient(res, model, text) {
 // ── Plain streaming (no Studio) ────────────────────────────────────────────
 async function plainStream(messages, apiKey, model, res) {
   const chain = [model, ...FALLBACK_CHAIN.filter(m => m !== model)];
-  let lastError = null;
   const failures = [];
 
   for (const m of chain) {
@@ -418,17 +464,15 @@ async function plainStream(messages, apiKey, model, res) {
       });
     } catch (err) {
       console.warn(`[chat] model ${m} network error: ${err.message} — trying next`);
-      lastError = `network error: ${err.message || 'request failed'}`;
-      failures.push(`${m}: ${lastError}`);
+      failures.push(`${m}: network error`);
       continue;
     }
 
     if (!upRes.ok) {
       let errBody = '';
       try { errBody = await upRes.text(); } catch { /* ignore */ }
-      lastError = `HTTP ${upRes.status}: ${errBody.slice(0, 150)}`;
-      failures.push(`${m}: ${lastError}`);
-      console.warn(`[chat] model ${m} ${lastError} — trying next`);
+      failures.push(`${m}: HTTP ${upRes.status}`);
+      console.warn(`[chat] model ${m} HTTP ${upRes.status} — trying next`);
       continue;
     }
 
@@ -452,7 +496,6 @@ async function plainStream(messages, apiKey, model, res) {
           if (!raw || raw === '[DONE]') continue;
           try {
             const chunk = JSON.parse(raw);
-            // Detect OpenRouter in-stream errors (HTTP 200 but error in body)
             if (chunk.error) {
               streamErr = `${chunk.error.message || JSON.stringify(chunk.error)} (code ${chunk.error.code || '?'})`;
               break;
@@ -470,11 +513,9 @@ async function plainStream(messages, apiKey, model, res) {
         }
         if (streamErr) break;
       }
-    } catch { /* stream interrupted — fall through */ }
+    } catch { /* stream interrupted */ }
 
     if (streamErr) {
-      console.warn(`[chat] model ${m} in-stream error: ${streamErr} — trying next`);
-      lastError = streamErr;
       failures.push(`${m}: ${streamErr}`);
       continue;
     }
@@ -483,25 +524,70 @@ async function plainStream(messages, apiKey, model, res) {
       res.end();
       return;
     }
-
-    lastError = 'empty response';
-    failures.push(`${m}: ${lastError}`);
-    console.warn(`[chat] model ${m} returned empty content — trying next`);
+    failures.push(`${m}: empty response`);
   }
 
   const allRateLimited =
-    failures.length > 0 && failures.every(failure => failure.includes(': HTTP 429'));
+    failures.length > 0 && failures.every(f => f.includes(': HTTP 429'));
   const error = allRateLimited
-    ? 'OpenRouter is rate-limiting every free model for this account (HTTP 429). Wait for the daily limit to reset or add OpenRouter credits to unlock more requests.'
-    : `All AI models are currently unavailable. ${failures.join('; ') || lastError || 'No model response.'}`;
+    ? 'OpenRouter is rate-limiting every free model (HTTP 429). Wait for the daily limit to reset or add OpenRouter credits.'
+    : `All AI models are currently unavailable. ${failures.join('; ') || 'No model response.'}`;
   writeSSE(res, { error });
   writeSSE(res, { done: true });
   res.end();
 }
 
+// ── Build TOOL_RESULT injection message ───────────────────────────────────
+// The framing here is critical to prevent the AI from claiming success,
+// fabricating what happened, or skipping subsequent required tools.
+function buildToolResultMessage(toolName, toolResult, isError) {
+  const resultJson = JSON.stringify(toolResult, null, 2);
+
+  if (isError) {
+    return (
+      `TOOL_RESULT [${toolName}] — FAILED\n` +
+      `${resultJson}\n\n` +
+      `The tool did NOT succeed. You MUST NOT claim the action was completed.\n` +
+      `Options:\n` +
+      `  1. Explain the error to the developer clearly.\n` +
+      `  2. If recoverable (e.g. wrong path), use a different tool to fix it (call get_tree to locate the correct path).\n` +
+      `  3. Never fabricate a success message after a failure.\n` +
+      `Respond now based on this failure result.`
+    );
+  }
+
+  return (
+    `TOOL_RESULT [${toolName}] — SUCCESS\n` +
+    `${resultJson}\n\n` +
+    `The tool executed successfully. The above data is the authoritative result from Roblox Studio.\n` +
+    `Rules:\n` +
+    `  - Base your response ONLY on this result, not on assumptions.\n` +
+    `  - If more tools are needed to complete the task, output the next TOOL:{...} call now.\n` +
+    `  - If the task is complete, summarize what was done based on this result. Be specific.\n` +
+    `  - Do NOT say "Done" or "Listo" without referencing what the result shows.\n` +
+    `Respond now.`
+  );
+}
+
+// ── Detect when AI skipped a required tool ────────────────────────────────
+// If we're in studio mode, the request clearly needed a tool, and the AI
+// responded with no TOOL: call, inject a reminder and retry once.
+function buildToolEnforcementMessage(userContent) {
+  return (
+    `SYSTEM: Your last response did not include a TOOL: call, but the developer's request ` +
+    `requires a Studio action:\n"${userContent}"\n\n` +
+    `You MUST use a tool. Do NOT describe the action or write example code instead.\n` +
+    `Look at the available tools in the system prompt and call the appropriate one now.\n` +
+    `Output ONLY the TOOL:{...} line.`
+  );
+}
+
 // ── Agentic loop: call AI → check for TOOL → execute → repeat ─────────────
-async function agentLoop(messages, apiKey, model, sessionId, res) {
-  const MAX_ROUNDS = 6; // prevent infinite loops
+async function agentLoop(messages, apiKey, model, sessionId, res, needsStudio) {
+  const MAX_ROUNDS = 12;        // increased for complex multi-step workflows
+  const MAX_TOOL_ENFORCEMENT_RETRIES = 1; // inject reminder if tool skipped
+  let headerSent = false;
+  let toolEnforcementRetries = 0;
 
   for (let round = 0; round < MAX_ROUNDS; round++) {
     const result = await streamWithCollection(messages, apiKey, model);
@@ -521,45 +607,75 @@ async function agentLoop(messages, apiKey, model, sessionId, res) {
     const toolCall = extractToolCall(text);
 
     if (!toolCall) {
-      // No tool call — this is the final answer, stream it to the client
-      streamTextToClient(res, usedModel, text);
+      // ── Tool enforcement: AI skipped a required tool ──────────────────
+      // Only enforce on the first round, and only if intent detection says
+      // a Studio action was required.
+      if (needsStudio && round < MAX_ROUNDS - 1 && toolEnforcementRetries < MAX_TOOL_ENFORCEMENT_RETRIES) {
+        toolEnforcementRetries++;
+        // The last user message is the most recent original request
+        const lastUserMsg = [...messages].reverse().find(m => m.role === 'user' && !m.content.startsWith('TOOL_RESULT') && !m.content.startsWith('SYSTEM:'));
+        if (lastUserMsg) {
+          // Stream the AI text so far, but append an enforcement nudge
+          if (!headerSent) {
+            writeSSE(res, { provider: 'OpenRouter', model: usedModel });
+            headerSent = true;
+          }
+          // Don't stream the response — it's a skipped-tool response, ask AI to retry
+          messages = [
+            ...messages,
+            { role: 'assistant', content: text },
+            { role: 'user', content: buildToolEnforcementMessage(lastUserMsg.content) },
+          ];
+          continue;
+        }
+      }
+
+      // No tool enforcement needed — this is the final answer
+      streamTextToClient(res, usedModel, text, { headerAlreadySent: headerSent });
+      headerSent = true;
       writeSSE(res, { done: true });
       res.end();
       return;
     }
 
-    // Show the user that a tool is running
-    const textBeforeTool = text.split(/TOOL:\s*\{/)[0].trim();
-    if (textBeforeTool) {
-      if (round === 0) writeSSE(res, { provider: 'OpenRouter', model: usedModel });
-      writeSSE(res, { content: textBeforeTool + '\n' });
-    } else if (round === 0) {
+    // ── Tool call detected ────────────────────────────────────────────────
+
+    // Emit text before the TOOL: line (applies to ALL rounds, not just round 0)
+    const toolMarkerIdx = text.indexOf('TOOL:');
+    const textBeforeTool = toolMarkerIdx > 0 ? text.slice(0, toolMarkerIdx).trim() : '';
+
+    if (!headerSent) {
       writeSSE(res, { provider: 'OpenRouter', model: usedModel });
+      headerSent = true;
+    }
+    if (textBeforeTool) {
+      writeSSE(res, { content: textBeforeTool + '\n' });
     }
 
-    writeSSE(res, { content: `\n⚙️ *Ejecutando \`${toolCall.name}\` en Studio...*\n` });
+    writeSSE(res, { content: `\n⚙️ *Ejecutando \`${toolCall.name}\`...*\n` });
 
     // Execute the tool
     const toolResult = await executeStudioTool(sessionId, toolCall.name, toolCall.args || {});
+    const isError = !!(toolResult && toolResult.error);
 
-    if (toolResult && toolResult.error) {
-      writeSSE(res, { content: `❌ *Error en Studio:* ${toolResult.error}\n\n` });
+    if (isError) {
+      writeSSE(res, { content: `❌ *Error: ${toolResult.error}*\n\n` });
     } else {
-      writeSSE(res, { content: `✅ *Listo.*\n\n` });
+      writeSSE(res, { content: `✅ *Resultado recibido de Studio.*\n\n` });
     }
 
-    // Inject the result back into the conversation
+    // Inject the result back into the conversation with strong framing
     messages = [
       ...messages,
       { role: 'assistant', content: text },
       {
         role: 'user',
-        content: `TOOL_RESULT for ${toolCall.name}:\n${JSON.stringify(toolResult, null, 2)}\n\nNow continue your response to the developer based on this result.`,
+        content: buildToolResultMessage(toolCall.name, toolResult, isError),
       },
     ];
   }
 
-  writeSSE(res, { error: 'Too many tool calls in one response.' });
+  writeSSE(res, { error: 'Demasiadas llamadas a herramientas en una respuesta. Por favor, intenta de nuevo.' });
   writeSSE(res, { done: true });
   res.end();
 }
@@ -594,8 +710,6 @@ module.exports = async function handler(req, res) {
   // ── Studio connected: use agentic tool loop ───────────────────────────
   if (sessionId) {
     const session = await getSession(sessionId);
-    // Never enter the agentic branch with an unknown session. A stale browser
-    // session must not make the model emit TOOL: text that cannot execute.
     if (!session) {
       writeSSE(res, {
         error: 'Studio session expired. Reconnect the plugin before asking Zenith to edit the project.',
@@ -603,7 +717,11 @@ module.exports = async function handler(req, res) {
       writeSSE(res, { done: true });
       return res.end();
     }
-    const systemPrompt = buildSystemPrompt(session);
+
+    // Detect whether the user's request clearly requires a Studio tool call.
+    // Used to enforce tool use and inject intent hint into the system prompt.
+    const needsStudio = detectStudioIntent(messages);
+    const systemPrompt = buildSystemPrompt(session, needsStudio);
 
     const openAIMessages = [
       { role: 'system', content: systemPrompt },
@@ -613,7 +731,7 @@ module.exports = async function handler(req, res) {
       })),
     ];
 
-    await agentLoop(openAIMessages, apiKey, model, sessionId, res);
+    await agentLoop(openAIMessages, apiKey, model, sessionId, res, needsStudio);
     return;
   }
 

@@ -176,10 +176,14 @@ export async function collectCompletion(
   messages: ChatMessage[],
   preferredModel: ModelId = DEFAULT_MODEL,
   pluginContext: string | null = null,
+  /** When provided, overrides the generated system prompt entirely. */
+  overrideSystemPrompt?: string,
 ): Promise<CompletionResult | { error: string }> {
   const provider = PROVIDERS[ACTIVE_PROVIDER];
   const apiKey = process.env[provider.envKey];
   if (!apiKey) return { error: "OPENROUTER_API_KEY is not configured on the server." };
+
+  const systemContent = overrideSystemPrompt ?? buildSystemPrompt(pluginContext);
 
   const failures: string[] = [];
   for (const model of buildChain(preferredModel)) {
@@ -198,7 +202,7 @@ export async function collectCompletion(
           stream: true,
           max_tokens: 8192,
           messages: [
-            { role: "system", content: buildSystemPrompt(pluginContext) },
+            { role: "system", content: systemContent },
             ...messages.map(message => ({
               role: message.role === "ai" ? "assistant" : "user",
               content: message.content,
