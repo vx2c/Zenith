@@ -983,12 +983,12 @@ function StudioBadge({ pluginStatus, isDark, compact }: { pluginStatus: PluginSt
 
   if (compact) {
     return (
-      <div title={connected ? `Place ${session?.placeId ?? '?'} — ID ${session?.username ?? '?'}` : 'No Studio plugin connected'}
+      <div title={connected ? `Place ID: ${session?.placeId ?? '?'}` : 'No plugin connected'}
         style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
         <span style={{ width: 8, height: 8, borderRadius: '50%', background: connected ? '#22c55e' : '#6b7280',
           boxShadow: connected ? '0 0 6px #22c55e88' : 'none', flexShrink: 0, display: 'inline-block', transition: 'all 0.3s' }} />
         <span style={{ fontSize: '0.72rem', fontWeight: 600, color: connected ? '#22c55e' : th.textSub }}>
-          {connected ? 'Studio' : 'No Studio'}
+          {connected ? `Place ID: ${session?.placeId ?? '?'}` : 'No Plugin'}
         </span>
       </div>
     );
@@ -1002,7 +1002,7 @@ function StudioBadge({ pluginStatus, isDark, compact }: { pluginStatus: PluginSt
         <Plug size={13} color={connected ? '#22c55e' : th.textSub} strokeWidth={2} />
         <span style={{ fontSize: '0.65rem', fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase',
           color: connected ? '#22c55e' : th.textSub }}>
-          {connected ? 'Studio conectado' : 'Studio desconectado'}
+          {connected ? 'Plugin Conectado' : 'Plugin Desconectado'}
         </span>
         <span style={{ width: 7, height: 7, borderRadius: '50%', background: connected ? '#22c55e' : '#6b7280',
           boxShadow: connected ? '0 0 5px #22c55e88' : 'none', marginLeft: 'auto', flexShrink: 0,
@@ -1060,6 +1060,7 @@ export default function Dashboard({ userName }: DashboardProps) {
         @keyframes zenithPulse { 0%,100% { opacity:1; transform:scale(1); } 50% { opacity:.5; transform:scale(.8); } }
         * { font-family: 'Inter', sans-serif; }
         @keyframes ziOrbit { to { transform: translate(-50%,-50%) rotate(360deg); } }
+        @keyframes ziGlow { 0%,100% { opacity:.85; } 50% { opacity:1; } }
         .zi-input-wrap {
           position: relative;
           flex: 1;
@@ -1072,10 +1073,39 @@ export default function Dashboard({ userName }: DashboardProps) {
           content: '';
           position: absolute;
           top: 50%; left: 50%;
-          width: 200%; height: 200%;
+          width: 220%; height: 220%;
           transform: translate(-50%,-50%) rotate(0deg);
-          background: conic-gradient(from 0deg, transparent 320deg, #a855f7 340deg, #e879f9 348deg, #38bdf8 355deg, transparent 360deg);
-          animation: ziOrbit 2s linear infinite;
+          background: conic-gradient(
+            from 0deg,
+            transparent 0deg,
+            transparent 280deg,
+            #7c3aed 300deg,
+            #a855f7 315deg,
+            #e879f9 330deg,
+            #38bdf8 345deg,
+            #7c3aed 355deg,
+            transparent 360deg
+          );
+          animation: ziOrbit 1.8s linear infinite, ziGlow 2.5s ease-in-out infinite;
+          z-index: 0;
+        }
+        .zi-input-wrap::after {
+          content: '';
+          position: absolute;
+          top: 50%; left: 50%;
+          width: 220%; height: 220%;
+          transform: translate(-50%,-50%) rotate(0deg);
+          background: conic-gradient(
+            from 180deg,
+            transparent 0deg,
+            transparent 280deg,
+            #38bdf8 300deg,
+            #a855f7 320deg,
+            transparent 340deg,
+            transparent 360deg
+          );
+          animation: ziOrbit 1.8s linear infinite reverse;
+          opacity: 0.45;
           z-index: 0;
         }
         .zi-input-inner {
