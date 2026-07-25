@@ -1060,7 +1060,6 @@ export default function Dashboard({ userName }: DashboardProps) {
         @keyframes zenithPulse { 0%,100% { opacity:1; transform:scale(1); } 50% { opacity:.5; transform:scale(.8); } }
         * { font-family: 'Inter', sans-serif; }
         @keyframes ziOrbit { to { transform: translate(-50%,-50%) rotate(360deg); } }
-        @keyframes ziGlow { 0%,100% { opacity:.85; } 50% { opacity:1; } }
         .zi-input-wrap {
           position: relative;
           flex: 1;
@@ -1077,35 +1076,17 @@ export default function Dashboard({ userName }: DashboardProps) {
           transform: translate(-50%,-50%) rotate(0deg);
           background: conic-gradient(
             from 0deg,
-            transparent 0deg,
-            transparent 280deg,
-            #7c3aed 300deg,
-            #a855f7 315deg,
-            #e879f9 330deg,
-            #38bdf8 345deg,
-            #7c3aed 355deg,
-            transparent 360deg
+            rgba(168,85,247,0)   0deg,
+            rgba(168,85,247,0.4) 20deg,
+            #a855f7              70deg,
+            #e879f9              130deg,
+            #38bdf8              190deg,
+            #7c3aed              250deg,
+            rgba(124,58,237,0.4) 315deg,
+            rgba(168,85,247,0)   345deg,
+            rgba(168,85,247,0)   360deg
           );
-          animation: ziOrbit 1.8s linear infinite, ziGlow 2.5s ease-in-out infinite;
-          z-index: 0;
-        }
-        .zi-input-wrap::after {
-          content: '';
-          position: absolute;
-          top: 50%; left: 50%;
-          width: 220%; height: 220%;
-          transform: translate(-50%,-50%) rotate(0deg);
-          background: conic-gradient(
-            from 180deg,
-            transparent 0deg,
-            transparent 280deg,
-            #38bdf8 300deg,
-            #a855f7 320deg,
-            transparent 340deg,
-            transparent 360deg
-          );
-          animation: ziOrbit 1.8s linear infinite reverse;
-          opacity: 0.45;
+          animation: ziOrbit 2.4s linear infinite;
           z-index: 0;
         }
         .zi-input-inner {
