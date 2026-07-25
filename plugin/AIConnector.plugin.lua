@@ -9,6 +9,7 @@ local MAX_HEARTBEAT_FAILURES = 3
 local HttpService = game:GetService("HttpService")
 local ScriptEditorService = game:GetService("ScriptEditorService")
 local ChangeHistoryService = game:GetService("ChangeHistoryService")
+local Selection = game:GetService("Selection")
 
 local toolbar = plugin:CreateToolbar("AI Connector")
 local button = toolbar:CreateButton("AIConnector", "Open Zenith AI Connector", "", "AI Connector")
@@ -178,6 +179,262 @@ local function writeSource(target, source)
     return true, nil
 end
 
+-- Convert Roblox values into JSON-safe values for the web app.
+local function encodeValue(value)
+    local kind = typeof(value)
+    if kind == "Color3" then
+        return { type = "Color3", r = value.R, g = value.G, b = value.B }
+    elseif kind == "Vector2" then
+        return { type = "Vector2", x = value.X, y = value.Y }
+    elseif kind == "Vector3" then
+        return { type = "Vector3", x = value.X, y = value.Y, z = value.Z }
+    elseif kind == "UDim" then
+        return { type = "UDim", scale = value.Scale, offset = value.Offset }
+    elseif kind == "UDim2" then
+        return {
+            type = "UDim2",
+            x = { scale = value.X.Scale, offset = value.X.Offset },
+            y = { scale = value.Y.Scale, offset = value.Y.Offset },
+        }
+    elseif kind == "CFrame" then
+        local components = { value:GetComponents() }
+        return { type = "CFrame", components = components }
+    elseif kind == "BrickColor" then
+        return { type = "BrickColor", name = value.Name, number = value.Number }
+    elseif kind == "EnumItem" then
+        return {
+            type = "Enum",
+            enum = tostring(value.EnumType):gsub("^Enum%.", ""),
+            value = value.Name,
+        }
+    elseif kind == "Instance" then
+        return value:GetFullName()
+    elseif type(value) == "table" then
+        local result = {}
+        for key, item in pairs(value) do
+            result[key] = encodeValue(item)
+        end
+        return result
+    end
+    return value
+end
+
+local function numberOr(value, fallback)
+    local number = tonumber(value)
+    if number == nil then
+        return fallback
+    end
+    return number
+end
+
+-- Accept explicit typed JSON values and convert them to Roblox datatypes.
+local function decodeValue(value, currentValue)
+    if type(value) ~= "table" then
+        if typeof(currentValue) == "EnumItem" and type(value) == "string" then
+            local enumName = tostring(currentValue.EnumType):gsub("^Enum%.", "")
+            local enum = Enum[enumName]
+            return enum and enum[value] or value
+        end
+        return value
+    end
+
+    local valueType = value.type
+    if valueType == "Color3" then
+        return Color3.new(numberOr(value.r, 0), numberOr(value.g, 0), numberOr(value.b, 0))
+    elseif valueType == "Vector2" then
+        return Vector2.new(numberOr(value.x, 0), numberOr(value.y, 0))
+    elseif valueType == "Vector3" then
+        return Vector3.new(numberOr(value.x, 0), numberOr(value.y, 0), numberOr(value.z, 0))
+    elseif valueType == "UDim" then
+        return UDim.new(numberOr(value.scale, 0), numberOr(value.offset, 0))
+    elseif valueType == "UDim2" then
+        local x = value.x or {}
+        local y = value.y or {}
+        return UDim2.new(
+            numberOr(x.scale, 0), numberOr(x.offset, 0),
+            numberOr(y.scale, 0), numberOr(y.offset, 0)
+        )
+    elseif valueType == "CFrame" and type(value.components) == "table" then
+        return CFrame.new(table.unpack(value.components))
+    elseif valueType == "BrickColor" then
+        if value.name then
+            return BrickColor.new(value.name)
+        end
+        return BrickColor.new(numberOr(value.number, 1))
+    elseif valueType == "Enum" then
+        local enumName = tostring(value.enum or ""):gsub("^Enum%.", "")
+        local enum = Enum[enumName]
+        local item = enum and enum[tostring(value.value)]
+        if item then
+            return item
+        end
+    elseif typeof(currentValue) == "EnumItem" and type(value.value) == "string" then
+        local enumName = tostring(currentValue.EnumType):gsub("^Enum%.", "")
+        local enum = Enum[enumName]
+        return enum and enum[value.value] or value
+    end
+    return value
+end
+
+local function applyProperties(target, properties)
+    local applied = {}
+    local errors = {}
+    for property, value in pairs(properties or {}) do
+        if property ~= "Parent" then
+            local readOk, currentValue = pcall(function()
+                return target[property]
+            end)
+            local converted = decodeValue(value, readOk and currentValue or nil)
+            local writeOk, writeError = pcall(function()
+                target[property] = converted
+            end)
+            if writeOk then
+                table.insert(applied, property)
+            else
+                errors[property] = tostring(writeError)
+            end
+        end
+    end
+    return next(errors) == nil, applied, errors
+end
+
+local PROPERTY_KEYS = {
+    "Name", "ClassName", "Archivable", "Parent",
+    "Anchored", "CanCollide", "CanTouch", "CanQuery", "CFrame", "Position",
+    "Orientation", "Size", "Color", "BrickColor", "Material", "Transparency",
+    "CastShadow", "Shape", "Reflectance", "Massless",
+    "Text", "TextColor3", "TextSize", "TextScaled", "TextWrapped", "TextXAlignment",
+    "TextYAlignment", "Font", "RichText", "LineHeight", "PlaceholderText",
+    "BackgroundColor3", "BackgroundTransparency", "BorderColor3", "BorderSizePixel",
+    "Visible", "Active", "Selectable", "ZIndex", "LayoutOrder", "Rotation",
+    "AnchorPoint", "Position", "Size", "ClipsDescendants", "AutomaticSize",
+    "ResetOnSpawn", "IgnoreGuiInset", "DisplayOrder", "Enabled",
+    "Image", "ImageColor3", "ImageTransparency", "ScaleType", "SliceCenter",
+    "FillDirection", "HorizontalAlignment", "VerticalAlignment", "Padding",
+    "SortOrder", "MaxTextSize", "MinTextSize",
+}
+
+local function readProperties(target)
+    local properties = {}
+    for _, property in ipairs(PROPERTY_KEYS) do
+        local ok, value = pcall(function()
+            return target[property]
+        end)
+        if ok and typeof(value) ~= "function" then
+            properties[property] = encodeValue(value)
+        end
+    end
+    local attributes = {}
+    for name, value in pairs(target:GetAttributes()) do
+        attributes[name] = encodeValue(value)
+    end
+    return properties, attributes
+end
+
+local function describeInstance(target, includeChildren)
+    local item = {
+        name = target.Name,
+        className = target.ClassName,
+        path = target:GetFullName(),
+    }
+    if includeChildren then
+        item.children = {}
+        for _, child in ipairs(target:GetChildren()) do
+            table.insert(item.children, describeInstance(child, false))
+        end
+    end
+    return item
+end
+
+local function buildTree(root, maxDepth, maxNodes)
+    local count = 0
+    local truncated = false
+    local function visit(target, depth)
+        if count >= maxNodes then
+            truncated = true
+            return nil
+        end
+        count = count + 1
+        local node = {
+            name = target.Name,
+            className = target.ClassName,
+            path = target:GetFullName(),
+        }
+        if depth < maxDepth then
+            node.children = {}
+            for _, child in ipairs(target:GetChildren()) do
+                local childNode = visit(child, depth + 1)
+                if childNode then
+                    table.insert(node.children, childNode)
+                else
+                    break
+                end
+            end
+        end
+        return node
+    end
+    local tree = visit(root, 0)
+    return tree, count, truncated
+end
+
+local function findInstances(root, query, wantedClass, maxResults)
+    local results = {}
+    local loweredQuery = string.lower(tostring(query or ""))
+    local function visit(target)
+        if #results >= maxResults then
+            return
+        end
+        local path = target:GetFullName()
+        local classMatches = not wantedClass or target:IsA(tostring(wantedClass))
+        local textMatches = loweredQuery == ""
+            or string.find(string.lower(target.Name), loweredQuery, 1, true)
+            or string.find(string.lower(path), loweredQuery, 1, true)
+        if classMatches and textMatches then
+            table.insert(results, {
+                name = target.Name,
+                className = target.ClassName,
+                path = path,
+            })
+        end
+        for _, child in ipairs(target:GetChildren()) do
+            if #results >= maxResults then
+                break
+            end
+            visit(child)
+        end
+    end
+    visit(root)
+    return results
+end
+
+local function createChildTree(parent, spec, created)
+    if type(spec) ~= "table" or not spec.name or not spec.className then
+        return nil, "Each child requires name and className"
+    end
+    local ok, instanceOrError = pcall(function()
+        return Instance.new(tostring(spec.className))
+    end)
+    if not ok then
+        return nil, "Invalid className " .. tostring(spec.className) .. ": " .. tostring(instanceOrError)
+    end
+    local instance = instanceOrError
+    instance.Name = tostring(spec.name)
+    local propertiesOk, _, propertyErrors = applyProperties(instance, spec.properties)
+    if not propertiesOk then
+        instance:Destroy()
+        return nil, "Could not set child properties: " .. HttpService:JSONEncode(propertyErrors)
+    end
+    instance.Parent = parent
+    table.insert(created, instance:GetFullName())
+    for _, childSpec in ipairs(spec.children or {}) do
+        local child, childError = createChildTree(instance, childSpec, created)
+        if not child then
+            return nil, childError
+        end
+    end
+    return instance
+end
+
 local function executeCommand(command)
     if not command or not command.type then
         return { success = false, error = "Invalid command" }
@@ -190,12 +447,49 @@ local function executeCommand(command)
         log("ping -> pong")
         return { success = true, value = "pong" }
     elseif commandType == "get_tree" then
-        local services = {}
-        for _, service in ipairs(game:GetChildren()) do
-            table.insert(services, service.Name)
+        local root = args.path and resolveFull(args.path) or game
+        if not root then
+            return { success = false, error = "Not found: " .. tostring(args.path) }
         end
-        log("get_tree -> " .. tostring(#services) .. " services")
-        return { success = true, services = services }
+        local maxDepth = math.min(math.max(numberOr(args.maxDepth, 6), 0), 12)
+        local maxNodes = math.min(math.max(numberOr(args.maxNodes, 500), 1), 2000)
+        local tree, count, truncated = buildTree(root, maxDepth, maxNodes)
+        log("get_tree: " .. root:GetFullName() .. " (" .. tostring(count) .. " nodes)")
+        return {
+            success = true,
+            root = root:GetFullName(),
+            tree = tree,
+            count = count,
+            truncated = truncated,
+        }
+    elseif commandType == "find_instances" then
+        local root = args.path and resolveFull(args.path) or game
+        if not root then
+            return { success = false, error = "Not found: " .. tostring(args.path) }
+        end
+        if args.className then
+            local classOk, classError = pcall(function()
+                root:IsA(tostring(args.className))
+            end)
+            if not classOk then
+                return { success = false, error = "Invalid className: " .. tostring(classError) }
+            end
+        end
+        local maxResults = math.min(math.max(numberOr(args.maxResults, 100), 1), 500)
+        local results = findInstances(root, args.query, args.className, maxResults)
+        log("find_instances: " .. tostring(#results) .. " matches")
+        return { success = true, results = results, count = #results }
+    elseif commandType == "get_selection" then
+        local selected = {}
+        for _, target in ipairs(Selection:Get()) do
+            table.insert(selected, {
+                name = target.Name,
+                className = target.ClassName,
+                path = target:GetFullName(),
+            })
+        end
+        log("get_selection: " .. tostring(#selected) .. " objects")
+        return { success = true, selection = selected, count = #selected }
     elseif commandType == "read_script" then
         local path = normalizePath(args.path)
         local target = resolveFull(path)
@@ -207,6 +501,22 @@ local function executeCommand(command)
         end
         log("read_script: " .. path)
         return { success = true, path = target:GetFullName(), source = target.Source }
+    elseif commandType == "get_properties" then
+        local path = normalizePath(args.path)
+        local target = resolveFull(path)
+        if not target then
+            return { success = false, error = "Not found: " .. path }
+        end
+        local properties, attributes = readProperties(target)
+        log("get_properties: " .. path)
+        return {
+            success = true,
+            path = target:GetFullName(),
+            name = target.Name,
+            className = target.ClassName,
+            properties = properties,
+            attributes = attributes,
+        }
     elseif commandType == "create_script" then
         local path = normalizePath(args.path)
         local scriptType = args.type or "Script"
@@ -243,6 +553,9 @@ local function executeCommand(command)
         if not target then
             return { success = false, error = "Not found: " .. path }
         end
+        if not target:IsA("LuaSourceContainer") then
+            return { success = false, error = "Not a script: " .. path }
+        end
         local wrote, writeError = writeSource(target, args.source or "")
         if not wrote then
             return { success = false, error = "Could not write script source: " .. writeError }
@@ -252,6 +565,170 @@ local function executeCommand(command)
         end)
         log("update_script: " .. path)
         return { success = true, path = target:GetFullName() }
+    elseif commandType == "set_properties" then
+        local path = normalizePath(args.path)
+        local target = resolveFull(path)
+        if not target then
+            return { success = false, error = "Not found: " .. path }
+        end
+        local ok, applied, errors = applyProperties(target, args.properties)
+        pcall(function()
+            ChangeHistoryService:SetWaypoint("Zenith set_properties " .. path)
+        end)
+        log("set_properties: " .. path)
+        return {
+            success = ok,
+            path = target:GetFullName(),
+            applied = applied,
+            errors = errors,
+            error = ok and nil or "One or more properties could not be set",
+        }
+    elseif commandType == "set_attributes" then
+        local path = normalizePath(args.path)
+        local target = resolveFull(path)
+        if not target then
+            return { success = false, error = "Not found: " .. path }
+        end
+        local applied = {}
+        local errors = {}
+        for name, value in pairs(args.attributes or {}) do
+            local converted = decodeValue(value, nil)
+            local ok, err = pcall(function()
+                target:SetAttribute(tostring(name), converted)
+            end)
+            if ok then
+                table.insert(applied, tostring(name))
+            else
+                errors[name] = tostring(err)
+            end
+        end
+        pcall(function()
+            ChangeHistoryService:SetWaypoint("Zenith set_attributes " .. path)
+        end)
+        return {
+            success = next(errors) == nil,
+            path = target:GetFullName(),
+            applied = applied,
+            errors = errors,
+        }
+    elseif commandType == "create_instance" or commandType == "create_gui" then
+        local path = normalizePath(args.path)
+        local parent, name = resolveParent(path)
+        if not parent then
+            return { success = false, error = "Parent not found for path: " .. path }
+        end
+        if parent:FindFirstChild(name) then
+            return { success = false, error = "Object already exists: " .. path }
+        end
+        local className = commandType == "create_gui" and "ScreenGui" or args.className
+        if not className then
+            return { success = false, error = "Missing className" }
+        end
+        local ok, instanceOrError = pcall(function()
+            return Instance.new(tostring(className))
+        end)
+        if not ok then
+            return { success = false, error = "Invalid className: " .. tostring(instanceOrError) }
+        end
+        local instance = instanceOrError
+        instance.Name = name
+        local propertiesOk, _, propertyErrors = applyProperties(instance, args.properties)
+        if not propertiesOk then
+            instance:Destroy()
+            return { success = false, error = "Could not set properties: " .. HttpService:JSONEncode(propertyErrors) }
+        end
+        instance.Parent = parent
+        local created = { instance:GetFullName() }
+        for _, childSpec in ipairs(args.children or {}) do
+            local child, childError = createChildTree(instance, childSpec, created)
+            if not child then
+                instance:Destroy()
+                return { success = false, error = childError }
+            end
+        end
+        pcall(function()
+            ChangeHistoryService:SetWaypoint("Zenith " .. commandType .. " " .. path)
+        end)
+        log(commandType .. ": " .. path .. " (" .. tostring(#created) .. " instances)")
+        return { success = true, path = instance:GetFullName(), className = instance.ClassName, created = created }
+    elseif commandType == "move_instance" then
+        local path = normalizePath(args.path)
+        local target = resolveFull(path)
+        local parent = resolveFull(args.parent)
+        if not target then
+            return { success = false, error = "Not found: " .. path }
+        end
+        if not parent then
+            return { success = false, error = "Parent not found: " .. tostring(args.parent) }
+        end
+        if target == game or target.Parent == game then
+            return { success = false, error = "Cannot move the DataModel or a top-level service" }
+        end
+        local ok, err = pcall(function()
+            target.Parent = parent
+        end)
+        if not ok then
+            return { success = false, error = tostring(err) }
+        end
+        pcall(function()
+            ChangeHistoryService:SetWaypoint("Zenith move_instance " .. path)
+        end)
+        return { success = true, path = target:GetFullName(), parent = parent:GetFullName() }
+    elseif commandType == "clone_instance" then
+        local path = normalizePath(args.path)
+        local target = resolveFull(path)
+        local parent = resolveFull(args.parent)
+        if not target then
+            return { success = false, error = "Not found: " .. path }
+        end
+        if not parent then
+            return { success = false, error = "Parent not found: " .. tostring(args.parent) }
+        end
+        local cloneOk, clone = pcall(function()
+            return target:Clone()
+        end)
+        if not cloneOk or not clone then
+            return { success = false, error = "Could not clone " .. path .. ". The object may not be Archivable." }
+        end
+        if args.name and tostring(args.name) ~= "" then
+            clone.Name = tostring(args.name)
+        end
+        local parentOk, parentError = pcall(function()
+            clone.Parent = parent
+        end)
+        if not parentOk then
+            clone:Destroy()
+            return { success = false, error = tostring(parentError) }
+        end
+        pcall(function()
+            ChangeHistoryService:SetWaypoint("Zenith clone_instance " .. path)
+        end)
+        log("clone_instance: " .. path .. " -> " .. clone:GetFullName())
+        return { success = true, source = path, path = clone:GetFullName(), className = clone.ClassName }
+    elseif commandType == "delete_instance" then
+        if args.confirm ~= true then
+            return { success = false, error = "Deletion requires confirm=true after an explicit user request." }
+        end
+        local path = normalizePath(args.path)
+        local target = resolveFull(path)
+        if not target then
+            return { success = false, error = "Not found: " .. path }
+        end
+        if target == game or target.Parent == game then
+            return { success = false, error = "Cannot delete the DataModel or a top-level service." }
+        end
+        local fullName = target:GetFullName()
+        local ok, err = pcall(function()
+            target:Destroy()
+        end)
+        if not ok then
+            return { success = false, error = tostring(err) }
+        end
+        pcall(function()
+            ChangeHistoryService:SetWaypoint("Zenith delete_instance " .. fullName)
+        end)
+        log("delete_instance: " .. fullName)
+        return { success = true, deleted = fullName }
     end
 
     return { success = false, error = "Unknown command type: " .. tostring(commandType) }
