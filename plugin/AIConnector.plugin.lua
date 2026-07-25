@@ -1376,3 +1376,30 @@ button.Click:Connect(function()
 end)
 
 log("Plugin loaded - ready to connect")
+
+-- Probe Script Injection permission at startup so the toggle appears in
+-- Plugins > Manage Plugins immediately, without waiting for the first
+-- script command.  The probe script is never parented to the DataModel.
+task.defer(function()
+	local probe = Instance.new("ModuleScript")
+	probe.Name = "__ZenithPermissionProbe__"
+	local ok, err = pcall(function()
+		ScriptEditorService:UpdateSourceAsync(probe, function()
+			return ""
+		end)
+	end)
+	pcall(function() probe:Destroy() end)
+	if not ok then
+		local msg = tostring(err or "")
+		local low = string.lower(msg)
+		if string.find(low, "permission", 1, true)
+			or string.find(low, "inject", 1, true)
+			or string.find(low, "denied", 1, true) then
+			log("⚠️  Script Injection permission not granted. "
+				.. "Go to Plugins > Manage Plugins > Zenith and enable Script Injection "
+				.. "to allow Zenith to create and edit scripts in your project.")
+		end
+	else
+		log("Script Injection permission available ✓")
+	end
+end)
