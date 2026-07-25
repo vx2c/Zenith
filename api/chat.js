@@ -2,6 +2,48 @@
 const { DEFAULT_MODEL, OPENROUTER_BASE, FALLBACK_CHAIN } = require('./aiService');
 const { getSession, enqueueCommand, getResult } = require('./session-store');
 
+// This is the allow-list implemented by AIConnector.plugin.lua. Never pass
+// an arbitrary model-generated name to the plugin: a typo should become a
+// visible assistant error, not an opaque Roblox-side failure.
+const SUPPORTED_STUDIO_TOOLS = new Set([
+  'ping',
+  'request_script_injection',
+  'get_tree',
+  'find_instances',
+  'get_selection',
+  'search_scripts',
+  'read_script',
+  'append_script',
+  'format_script',
+  'create_module',
+  'get_properties',
+  'get_attributes',
+  'create_script',
+  'update_script',
+  'set_properties',
+  'set_attributes',
+  'create_instance',
+  'create_gui',
+  'create_ui_element',
+  'update_ui_element',
+  'create_part',
+  'create_model',
+  'create_spawn',
+  'create_remote_event',
+  'create_remote_function',
+  'create_folder',
+  'rename_instance',
+  'move_instance',
+  'clone_instance',
+  'delete_instance',
+  'get_output_logs',
+  'clear_output',
+  'save_place',
+  'detect_systems',
+  'analyze_project',
+  'summarize_project',
+]);
+
 function parseJsonBody(req) {
   return new Promise((resolve, reject) => {
     let body = '';
@@ -137,12 +179,14 @@ function buildSystemPrompt(session) {
     '1. If the user asks to create, edit, read, or inspect anything in Studio → use the right tool.',
     '2. After outputting TOOL:{...}, STOP and wait. Do NOT continue the response.',
     '3. The system will execute the tool and inject the result. Then you continue.',
-    '4. NEVER say "I created X" without having used the create_script tool first.',
-    '5. NEVER tell the user to do something manually if a tool can do it.',
-    '6. Treat TOOL_RESULT as authoritative: if it contains an error or success=false, explain the failure and never claim the change succeeded.',
-    '7. For broad project questions, call get_tree or find_instances before making assumptions.',
-    '8. Use create_instance with nested children to build complete GUIs in one verified operation.',
-    '9. Never delete or overwrite user content unless the user explicitly asks for that exact change.',
+    '4. Before the first mutating tool call, briefly output a line beginning with "PLAN:" and list the intended steps.',
+    '5. Use only the exact tool names listed above. Never invent a tool or a Roblox API call as a TOOL.',
+    '6. NEVER say "I created X" without having used the create_script tool first.',
+    '7. NEVER tell the user to do something manually if a tool can do it.',
+    '8. Treat TOOL_RESULT as authoritative: if it contains an error or success=false, explain the failure and never claim the change succeeded.',
+    '9. For broad project questions, call get_tree or find_instances before making assumptions.',
+    '10. Use create_instance with nested children to build complete GUIs in one verified operation.',
+    '11. Never delete or overwrite user content unless the user explicitly asks for that exact change.',
   ].filter(Boolean).join('\n');
 
   return base + studioContext;
@@ -150,6 +194,9 @@ function buildSystemPrompt(session) {
 
 // ── Execute one Studio command via the plugin ──────────────────────────────
 async function executeStudioTool(sessionId, toolName, args) {
+  const validationError = validateToolCall(toolName, args);
+  if (validationError) return { error: validationError };
+
   const commandId = await enqueueCommand(sessionId, toolName, args || {});
   if (!commandId) return { error: 'Session expired — plugin disconnected.' };
 
@@ -175,6 +222,39 @@ async function executeStudioTool(sessionId, toolName, args) {
     await new Promise(r => setTimeout(r, 500));
   }
   return { error: 'Studio plugin did not respond in 10s. Make sure Studio is open and the plugin is connected.' };
+}
+
+function validateToolCall(toolName, args) {
+  if (!SUPPORTED_STUDIO_TOOLS.has(toolName)) {
+    return `Unsupported Studio tool "${String(toolName)}". Use only the tools listed in the system prompt.`;
+  }
+  if (!args || typeof args !== 'object' || Array.isArray(args)) {
+    return `Invalid arguments for "${toolName}": args must be a JSON object.`;
+  }
+  if (toolName === 'delete_instance' && args.confirm !== true) {
+    return 'delete_instance requires confirm:true and an explicit user request.';
+  }
+
+  for (const key of ['path', 'parent']) {
+    if (args[key] !== undefined && (typeof args[key] !== 'string' || !args[key].trim())) {
+      return `Invalid "${key}" for "${toolName}": expected a non-empty path string.`;
+    }
+  }
+  if (args.path && args.path.includes('..')) {
+    return `Invalid path for "${toolName}": parent traversal is not allowed.`;
+  }
+  if (args.parent && args.parent.includes('..')) {
+    return `Invalid parent for "${toolName}": parent traversal is not allowed.`;
+  }
+  for (const key of ['source', 'query', 'name', 'className', 'type']) {
+    if (args[key] !== undefined && typeof args[key] !== 'string') {
+      return `Invalid "${key}" for "${toolName}": expected a string.`;
+    }
+  }
+  if (typeof args.source === 'string' && args.source.length > 100_000) {
+    return `Source for "${toolName}" is too large (maximum 100,000 characters).`;
+  }
+  return null;
 }
 
 // ── Parse TOOL:{...} lines from AI text output ─────────────────────────────
@@ -224,6 +304,7 @@ function extractToolCall(text) {
 // ── Stream from OpenRouter, collecting full text ───────────────────────────
 async function streamWithCollection(messages, apiKey, model) {
   const chain = [model, ...FALLBACK_CHAIN.filter(m => m !== model)];
+  const failures = [];
 
   for (const m of chain) {
     let upRes;
@@ -240,6 +321,7 @@ async function streamWithCollection(messages, apiKey, model) {
       });
     } catch (err) {
       console.warn(`[chat/collect] model ${m} network error: ${err.message} — trying next`);
+      failures.push(`${m}: network error`);
       continue;
     }
 
@@ -247,6 +329,7 @@ async function streamWithCollection(messages, apiKey, model) {
       let errBody = '';
       try { errBody = await upRes.text(); } catch { /* ignore */ }
       console.warn(`[chat/collect] model ${m} HTTP ${upRes.status}: ${errBody.slice(0, 200)} — trying next`);
+      failures.push(`${m}: HTTP ${upRes.status}`);
       continue;
     }
 
@@ -284,13 +367,24 @@ async function streamWithCollection(messages, apiKey, model) {
 
     if (streamError) {
       console.warn(`[chat/collect] model ${m} in-stream error: ${streamError} — trying next`);
+      failures.push(`${m}: ${streamError.slice(0, 160)}`);
       continue;
     }
     if (full) return { model: m, text: full };
 
     console.warn(`[chat/collect] model ${m} returned empty content — trying next`);
+    failures.push(`${m}: empty response`);
   }
-  return null;
+  const allRateLimited =
+    failures.length > 0 && failures.every(failure => failure.includes(': HTTP 429'));
+  if (allRateLimited) {
+    return {
+      error:
+        'OpenRouter is rate-limiting every free model for this account (HTTP 429). ' +
+        'Wait for the daily limit to reset or add OpenRouter credits to unlock more requests.',
+    };
+  }
+  return { error: failures.join('; ') || 'no model response' };
 }
 
 // ── Stream pre-built text to client via SSE ────────────────────────────────
@@ -307,6 +401,7 @@ function streamTextToClient(res, model, text) {
 async function plainStream(messages, apiKey, model, res) {
   const chain = [model, ...FALLBACK_CHAIN.filter(m => m !== model)];
   let lastError = null;
+  let rateLimited = false;
 
   for (const m of chain) {
     let upRes;
@@ -330,6 +425,7 @@ async function plainStream(messages, apiKey, model, res) {
       let errBody = '';
       try { errBody = await upRes.text(); } catch { /* ignore */ }
       lastError = `HTTP ${upRes.status}: ${errBody.slice(0, 150)}`;
+      if (upRes.status === 429) rateLimited = true;
       console.warn(`[chat] model ${m} ${lastError} — trying next`);
       continue;
     }
@@ -389,8 +485,10 @@ async function plainStream(messages, apiKey, model, res) {
     console.warn(`[chat] model ${m} returned empty content — trying next`);
   }
 
-  const detail = lastError ? ` (${lastError})` : '';
-  writeSSE(res, { error: `All AI models are currently unavailable${detail}. Try again in a moment.` });
+  const error = rateLimited
+    ? 'OpenRouter is rate-limiting every free model for this account (HTTP 429). Wait for the daily limit to reset or add OpenRouter credits to unlock more requests.'
+    : `All AI models are currently unavailable${lastError ? ` (${lastError})` : ''}. Try again in a moment.`;
+  writeSSE(res, { error });
   writeSSE(res, { done: true });
   res.end();
 }
@@ -402,8 +500,10 @@ async function agentLoop(messages, apiKey, model, sessionId, res) {
   for (let round = 0; round < MAX_ROUNDS; round++) {
     const result = await streamWithCollection(messages, apiKey, model);
 
-    if (!result) {
-      writeSSE(res, { error: 'All AI models are currently unavailable.' });
+    if (!result || result.error) {
+      writeSSE(res, {
+        error: `All AI models are currently unavailable. ${result?.error || 'No model response.'}`,
+      });
       writeSSE(res, { done: true });
       res.end();
       return;
