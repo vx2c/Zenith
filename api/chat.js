@@ -588,6 +588,7 @@ async function agentLoop(messages, apiKey, model, sessionId, res, needsStudio) {
   const MAX_TOOL_ENFORCEMENT_RETRIES = 1; // inject reminder if tool skipped
   let headerSent = false;
   let toolEnforcementRetries = 0;
+  let toolsExecuted = 0; // how many tools have actually run this turn
 
   for (let round = 0; round < MAX_ROUNDS; round++) {
     const result = await streamWithCollection(messages, apiKey, model);
@@ -610,7 +611,7 @@ async function agentLoop(messages, apiKey, model, sessionId, res, needsStudio) {
       // ── Tool enforcement: AI skipped a required tool ──────────────────
       // Only enforce on the first round, and only if intent detection says
       // a Studio action was required.
-      if (needsStudio && round < MAX_ROUNDS - 1 && toolEnforcementRetries < MAX_TOOL_ENFORCEMENT_RETRIES) {
+      if (needsStudio && toolsExecuted === 0 && round < MAX_ROUNDS - 1 && toolEnforcementRetries < MAX_TOOL_ENFORCEMENT_RETRIES) {
         toolEnforcementRetries++;
         // The last user message is the most recent original request
         const lastUserMsg = [...messages].reverse().find(m => m.role === 'user' && !m.content.startsWith('TOOL_RESULT') && !m.content.startsWith('SYSTEM:'));
@@ -657,6 +658,7 @@ async function agentLoop(messages, apiKey, model, sessionId, res, needsStudio) {
     // Execute the tool
     const toolResult = await executeStudioTool(sessionId, toolCall.name, toolCall.args || {});
     const isError = !!(toolResult && toolResult.error);
+    toolsExecuted++;
 
     if (isError) {
       writeSSE(res, { content: `❌ *Error: ${toolResult.error}*\n\n` });
