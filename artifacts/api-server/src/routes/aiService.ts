@@ -13,13 +13,14 @@ const SITE_NAME       = "Zenith - Roblox Studio AI";
 
 // ── Model registry ───────────────────────────
 
-// Keep this list aligned with the current OpenRouter /api/v1/models catalog.
+// Prefer the models Zenith has historically used successfully. OpenRouter's
+// free pool changes providers frequently, so openrouter/free is kept last as
+// a dynamic fallback instead of hard-coding more unstable model IDs.
 export const FALLBACK_CHAIN = [
-  "cohere/north-mini-code:free",
   "google/gemma-4-26b-a4b-it:free",
-  "openai/gpt-oss-20b:free",
-  "poolside/laguna-m.1:free",
   "nvidia/nemotron-nano-9b-v2:free",
+  "openai/gpt-oss-20b:free",
+  "openrouter/free",
 ] as const;
 
 export type ModelId = (typeof FALLBACK_CHAIN)[number] | (string & {});

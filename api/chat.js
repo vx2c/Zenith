@@ -321,7 +321,7 @@ async function streamWithCollection(messages, apiKey, model) {
       });
     } catch (err) {
       console.warn(`[chat/collect] model ${m} network error: ${err.message} — trying next`);
-      failures.push(`${m}: network error`);
+      failures.push(`${m}: network error (${err.message || 'request failed'})`);
       continue;
     }
 
@@ -401,7 +401,7 @@ function streamTextToClient(res, model, text) {
 async function plainStream(messages, apiKey, model, res) {
   const chain = [model, ...FALLBACK_CHAIN.filter(m => m !== model)];
   let lastError = null;
-  let rateLimited = false;
+  const failures = [];
 
   for (const m of chain) {
     let upRes;
@@ -418,6 +418,8 @@ async function plainStream(messages, apiKey, model, res) {
       });
     } catch (err) {
       console.warn(`[chat] model ${m} network error: ${err.message} — trying next`);
+      lastError = `network error: ${err.message || 'request failed'}`;
+      failures.push(`${m}: ${lastError}`);
       continue;
     }
 
@@ -425,7 +427,7 @@ async function plainStream(messages, apiKey, model, res) {
       let errBody = '';
       try { errBody = await upRes.text(); } catch { /* ignore */ }
       lastError = `HTTP ${upRes.status}: ${errBody.slice(0, 150)}`;
-      if (upRes.status === 429) rateLimited = true;
+      failures.push(`${m}: ${lastError}`);
       console.warn(`[chat] model ${m} ${lastError} — trying next`);
       continue;
     }
@@ -473,6 +475,7 @@ async function plainStream(messages, apiKey, model, res) {
     if (streamErr) {
       console.warn(`[chat] model ${m} in-stream error: ${streamErr} — trying next`);
       lastError = streamErr;
+      failures.push(`${m}: ${streamErr}`);
       continue;
     }
     if (gotContent) {
@@ -482,12 +485,15 @@ async function plainStream(messages, apiKey, model, res) {
     }
 
     lastError = 'empty response';
+    failures.push(`${m}: ${lastError}`);
     console.warn(`[chat] model ${m} returned empty content — trying next`);
   }
 
-  const error = rateLimited
+  const allRateLimited =
+    failures.length > 0 && failures.every(failure => failure.includes(': HTTP 429'));
+  const error = allRateLimited
     ? 'OpenRouter is rate-limiting every free model for this account (HTTP 429). Wait for the daily limit to reset or add OpenRouter credits to unlock more requests.'
-    : `All AI models are currently unavailable${lastError ? ` (${lastError})` : ''}. Try again in a moment.`;
+    : `All AI models are currently unavailable. ${failures.join('; ') || lastError || 'No model response.'}`;
   writeSSE(res, { error });
   writeSSE(res, { done: true });
   res.end();
