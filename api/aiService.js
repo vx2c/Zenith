@@ -11,15 +11,15 @@ const SITE_URL        = process.env.SITE_URL || 'https://xzenith.vercel.app';
 const SITE_NAME       = 'Zenith - Roblox Studio AI';
 
 // ── Model registry ───────────────────────────
-// Verified 2025-07-24: these models exist and are free on OpenRouter.
-// Ordered by response speed (faster first) — critical for Vercel 60s limit.
+// Updated 2025-07-25: stable free-tier models on OpenRouter.
+// Ordered by reliability + speed — critical for Vercel 60s limit.
 const FALLBACK_CHAIN = [
-  'google/gemma-4-26b-a4b-it:free',   // MoE: only 4B active params → fastest
-  'openai/gpt-oss-20b:free',           // 20B, good quality + speed
-  'nvidia/nemotron-nano-9b-v2:free',   // 9B nano, very fast
-  'google/gemma-4-31b-it:free',        // 31B dense, quality fallback
-  'cohere/north-mini-code:free',       // code-specialist (great for Lua)
-  'poolside/laguna-m.1:free',          // code-specialist fallback
+  'google/gemma-2-9b-it:free',          // very stable, fast
+  'meta-llama/llama-3.1-8b-instruct:free', // very stable
+  'mistralai/mistral-7b-instruct:free', // very stable fallback
+  'google/gemma-2-27b-it:free',         // better quality
+  'qwen/qwen-2.5-7b-instruct:free',     // good code quality
+  'google/gemma-4-27b-it:free',         // newer model, extra fallback
 ];
 
 const DEFAULT_MODEL = FALLBACK_CHAIN[0];

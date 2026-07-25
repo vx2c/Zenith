@@ -394,6 +394,7 @@ local function decodeUDimAxis(axis)
 end
 
 -- Accept explicit typed JSON values and convert them to Roblox datatypes.
+-- Also infers the target type from currentValue when the AI omits the "type" field.
 local function decodeValue(value, currentValue)
 	if type(value) ~= "table" then
 		if typeof(currentValue) == "EnumItem" and type(value) == "string" then
@@ -404,6 +405,7 @@ local function decodeValue(value, currentValue)
 		return value
 	end
 
+	-- ── Explicit typed values (preferred format) ────────────────────────
 	local valueType = value.type
 	if valueType == "Color3" then
 		return Color3.new(numberOr(value.r, 0), numberOr(value.g, 0), numberOr(value.b, 0))
@@ -416,10 +418,7 @@ local function decodeValue(value, currentValue)
 	elseif valueType == "UDim2" then
 		local xScale, xOffset = decodeUDimAxis(value.x or value.X)
 		local yScale, yOffset = decodeUDimAxis(value.y or value.Y)
-		return UDim2.new(
-			xScale, xOffset,
-			yScale, yOffset
-		)
+		return UDim2.new(xScale, xOffset, yScale, yOffset)
 	elseif valueType == "CFrame" and type(value.components) == "table" then
 		return CFrame.new(table.unpack(value.components))
 	elseif valueType == "BrickColor" then
@@ -439,6 +438,37 @@ local function decodeValue(value, currentValue)
 		local enum = Enum[enumName]
 		return enum and enum[value.value] or value
 	end
+
+	-- ── Infer type from currentValue when "type" field is absent ────────
+	-- This handles untyped tables the AI sometimes emits, e.g.:
+	--   AnchorPoint: {x:0.5, y:0.5}   (should be Vector2)
+	--   BackgroundColor3: {r:1,g:0,b:0} (should be Color3)
+	--   Position/Size: {x:0.5,y:0.5}  (should be UDim2)
+	if not valueType then
+		local currentKind = typeof(currentValue)
+		if currentKind == "Color3" and (value.r ~= nil or value.g ~= nil or value.b ~= nil) then
+			return Color3.new(numberOr(value.r, 0), numberOr(value.g, 0), numberOr(value.b, 0))
+		elseif currentKind == "Vector2" and (value.x ~= nil or value.y ~= nil) then
+			return Vector2.new(numberOr(value.x, 0), numberOr(value.y, 0))
+		elseif currentKind == "Vector3" and (value.x ~= nil or value.y ~= nil or value.z ~= nil) then
+			return Vector3.new(numberOr(value.x, 0), numberOr(value.y, 0), numberOr(value.z, 0))
+		elseif currentKind == "UDim2" then
+			-- Accept both {x:{scale,offset},y:{scale,offset}} and flat {x,y} (treated as scale)
+			local xScale, xOffset = decodeUDimAxis(value.x or value.X or 0)
+			local yScale, yOffset = decodeUDimAxis(value.y or value.Y or 0)
+			return UDim2.new(xScale, xOffset, yScale, yOffset)
+		elseif currentKind == "UDim" then
+			return UDim.new(
+				numberOr(value.scale or value.Scale, 0),
+				numberOr(value.offset or value.Offset, 0)
+			)
+		elseif currentKind == "EnumItem" and value.value ~= nil then
+			local enumName = tostring(currentValue.EnumType):gsub("^Enum%.", "")
+			local enum = Enum[enumName]
+			return enum and enum[tostring(value.value)] or value
+		end
+	end
+
 	return value
 end
 
