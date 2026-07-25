@@ -645,6 +645,68 @@ function SettingsPanel({ isDark, lang, onSetTheme, onSetLang }:
           <OptionBtn value="es" current={lang} label={T.langEs} onClick={() => onSetLang('es')} />
         </div>
       </div>
+
+      {/* Roles */}
+      <div style={{ ...sectionStyle, gap: '1.25rem' }}>
+        <div style={labelStyle}>Roles</div>
+        {[
+          {
+            name:   'vx2c',
+            role:   'Web Founder',
+            job:    'Web Developer & Bot Discord',
+            avatar: `${import.meta.env.BASE_URL}founder-avatar.jpg`,
+            url:    'https://www.roblox.com/users/8677588088/profile',
+          },
+          {
+            name:   'Lead Developer',
+            role:   'Lead Developer',
+            job:    'Plugin Developer & Web Dominio',
+            avatar: `${import.meta.env.BASE_URL}lead-dev-avatar.jpg`,
+            url:    'https://www.roblox.com/users/14257636/profile',
+          },
+        ].map(member => (
+          <div key={member.name} style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+            {/* Avatar */}
+            <img
+              src={member.avatar}
+              alt={member.name}
+              style={{ width: 56, height: 56, borderRadius: '50%', objectFit: 'cover', flexShrink: 0,
+                border: `2px solid ${th.cardBorder}`, boxShadow: '0 4px 12px rgba(0,0,0,0.15)' }}
+            />
+            {/* Info */}
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontWeight: 700, fontSize: '0.9rem', color: th.text, marginBottom: '0.125rem' }}>
+                {member.name}
+              </div>
+              <div style={{ fontSize: '0.72rem', fontWeight: 700, letterSpacing: '0.06em',
+                textTransform: 'uppercase', color: '#a855f7', marginBottom: '0.25rem' }}>
+                {member.role}
+              </div>
+              <div style={{ fontSize: '0.78rem', color: th.textSub }}>{member.job}</div>
+            </div>
+            {/* Visit button */}
+            <a
+              href={member.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              style={{ display: 'inline-flex', alignItems: 'center', gap: '5px',
+                padding: '0.5rem 1rem', borderRadius: '10px', fontWeight: 700,
+                fontSize: '0.78rem', textDecoration: 'none', flexShrink: 0,
+                background: th.text, color: isDark ? '#111' : '#fff',
+                transition: 'all 0.2s', border: 'none', cursor: 'pointer' }}
+              onMouseEnter={e => { (e.currentTarget as HTMLAnchorElement).style.opacity = '0.8'; }}
+              onMouseLeave={e => { (e.currentTarget as HTMLAnchorElement).style.opacity = '1'; }}
+            >
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>
+                <polyline points="15 3 21 3 21 9"/>
+                <line x1="10" y1="14" x2="21" y2="3"/>
+              </svg>
+              Visit
+            </a>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
@@ -842,16 +904,18 @@ function AssistantPanel({ isDark, lang, pluginSession }: { isDark: boolean; lang
           </button>
         </div>
 
-        <textarea ref={textareaRef} value={input} onChange={onInputChange} onKeyDown={onKeyDown}
-          placeholder={T.placeholder} rows={1} disabled={loading}
-          style={{ flex: 1, resize: 'none', border: `2px solid ${th.inputBorder}`, borderRadius: 16,
-            padding: '0.75rem 1rem', fontSize: '1rem', fontFamily: "'Inter', sans-serif",
-            outline: 'none', background: th.inputBg, color: th.text, lineHeight: 1.5,
-            maxHeight: 120, overflowY: 'auto', transition: 'border-color 0.2s',
-            boxSizing: 'border-box' }}
-          onFocus={e => (e.currentTarget.style.borderColor = th.inputFocus)}
-          onBlur={e => (e.currentTarget.style.borderColor = th.inputBorder)}
-        />
+        <div className="zi-input-wrap">
+          <div className="zi-input-inner" style={{ background: th.inputBg }}>
+            <textarea ref={textareaRef} value={input} onChange={onInputChange} onKeyDown={onKeyDown}
+              placeholder={T.placeholder} rows={1} disabled={loading}
+              style={{ width: '100%', resize: 'none', border: 'none', borderRadius: 16,
+                padding: '0.75rem 1rem', fontSize: '1rem', fontFamily: "'Inter', sans-serif",
+                outline: 'none', background: 'transparent', color: th.text, lineHeight: 1.5,
+                maxHeight: 120, overflowY: 'auto',
+                boxSizing: 'border-box', display: 'block' }}
+            />
+          </div>
+        </div>
 
         {/* Send / Stop */}
         {loading ? (
@@ -946,7 +1010,7 @@ function StudioBadge({ pluginStatus, isDark, compact }: { pluginStatus: PluginSt
       </div>
       {connected && session && (
         <div style={{ fontSize: '0.7rem', color: th.textSub, lineHeight: 1.5, paddingLeft: '1px' }}>
-          {session.placeId && <div>Place: <span style={{ fontFamily: 'monospace', color: th.text }}>{session.placeId}</span></div>}
+          {session.placeId && <div>Place ID: <span style={{ fontFamily: 'monospace', color: th.text }}>{session.placeId}</span></div>}
           {session.username && <div>Dev ID: <span style={{ fontFamily: 'monospace', color: th.text }}>{session.username}</span></div>}
         </div>
       )}
@@ -995,6 +1059,31 @@ export default function Dashboard({ userName }: DashboardProps) {
         @keyframes spin       { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
         @keyframes zenithPulse { 0%,100% { opacity:1; transform:scale(1); } 50% { opacity:.5; transform:scale(.8); } }
         * { font-family: 'Inter', sans-serif; }
+        @keyframes ziOrbit { to { transform: translate(-50%,-50%) rotate(360deg); } }
+        .zi-input-wrap {
+          position: relative;
+          flex: 1;
+          border-radius: 18px;
+          padding: 2px;
+          overflow: hidden;
+          background: transparent;
+        }
+        .zi-input-wrap::before {
+          content: '';
+          position: absolute;
+          top: 50%; left: 50%;
+          width: 200%; height: 200%;
+          transform: translate(-50%,-50%) rotate(0deg);
+          background: conic-gradient(from 0deg, transparent 320deg, #a855f7 340deg, #e879f9 348deg, #38bdf8 355deg, transparent 360deg);
+          animation: ziOrbit 2s linear infinite;
+          z-index: 0;
+        }
+        .zi-input-inner {
+          position: relative;
+          z-index: 1;
+          border-radius: 16px;
+          overflow: hidden;
+        }
       `}</style>
 
       <div className="absolute inset-0" style={{
@@ -1003,6 +1092,22 @@ export default function Dashboard({ userName }: DashboardProps) {
 
       {/* AFK overlay */}
       {isAFK && <AFKScreen userName={userName} onDismiss={dismissAFK} isDark={isDark} lang={lang} />}
+
+      {/* Floating sidebar reopen button — only when sidebar is collapsed */}
+      {!sidebarOpen && (
+        <button
+          onClick={() => setSidebarOpen(true)}
+          title="Open sidebar"
+          style={{ position: 'fixed', left: '1rem', top: '50%', transform: 'translateY(-50%)',
+            zIndex: 200, width: 36, height: 36, borderRadius: 12,
+            background: th.sidebar, border: `1px solid ${th.divider}`,
+            boxShadow: th.sidebarShadow, cursor: 'pointer',
+            display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'all 0.2s' }}
+          onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.background = isDark ? 'rgba(255,255,255,0.12)' : '#f0f0f0'; }}
+          onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.background = th.sidebar; }}>
+          <ChevronRight size={18} color={th.textSub} />
+        </button>
+      )}
 
       {/* Community modal */}
       {showCommunity && <CommunityModal onClose={() => setShowCommunity(false)} isDark={isDark} lang={lang} />}
