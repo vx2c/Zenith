@@ -306,6 +306,7 @@ function streamTextToClient(res, model, text) {
 // ── Plain streaming (no Studio) ────────────────────────────────────────────
 async function plainStream(messages, apiKey, model, res) {
   const chain = [model, ...FALLBACK_CHAIN.filter(m => m !== model)];
+  let lastError = null;
 
   for (const m of chain) {
     let upRes;
@@ -328,7 +329,8 @@ async function plainStream(messages, apiKey, model, res) {
     if (!upRes.ok) {
       let errBody = '';
       try { errBody = await upRes.text(); } catch { /* ignore */ }
-      console.warn(`[chat] model ${m} HTTP ${upRes.status}: ${errBody.slice(0, 200)} — trying next`);
+      lastError = `HTTP ${upRes.status}: ${errBody.slice(0, 150)}`;
+      console.warn(`[chat] model ${m} ${lastError} — trying next`);
       continue;
     }
 
@@ -374,6 +376,7 @@ async function plainStream(messages, apiKey, model, res) {
 
     if (streamErr) {
       console.warn(`[chat] model ${m} in-stream error: ${streamErr} — trying next`);
+      lastError = streamErr;
       continue;
     }
     if (gotContent) {
@@ -382,10 +385,12 @@ async function plainStream(messages, apiKey, model, res) {
       return;
     }
 
+    lastError = 'empty response';
     console.warn(`[chat] model ${m} returned empty content — trying next`);
   }
 
-  writeSSE(res, { error: 'All AI models are currently unavailable. Try again in a moment.' });
+  const detail = lastError ? ` (${lastError})` : '';
+  writeSSE(res, { error: `All AI models are currently unavailable${detail}. Try again in a moment.` });
   writeSSE(res, { done: true });
   res.end();
 }

@@ -9,7 +9,8 @@
     "api/connect.js": { "maxDuration": 10 },
     "api/heartbeat.js": { "maxDuration": 10 },
     "api/command_result.js": { "maxDuration": 10 },
-    "api/plugin-status.js": { "maxDuration": 10 }
+    "api/plugin-status.js": { "maxDuration": 10 },
+    "api/debug-models.js": { "maxDuration": 30 }
   },
   "headers": [
     {
