@@ -681,6 +681,7 @@ function toggleSidebar() {
   const sb = el('sidebar');
   sb.classList.toggle('collapsed', state.collapsed);
   el('main').classList.toggle('wide', state.collapsed);
+  document.body.classList.toggle('sidebar-collapsed', state.collapsed);
 }
 
 // ── Plus menu ─────────────────────────────────
@@ -779,7 +780,7 @@ async function loadPluginStatus() {
       if (meta) {
         const parts = [];
         if (session.placeName) parts.push(session.placeName);
-        else if (session.placeId) parts.push('Place ' + session.placeId);
+        else if (session.placeId) parts.push('Place ID: ' + session.placeId);
         meta.textContent = parts.join(' · ') || 'Connected';
       }
     } else {
@@ -842,6 +843,7 @@ function wire() {
   el('btn-logout')?.addEventListener('click', logout);
   el('btn-new-chat').addEventListener('click', () => { if (!state.responding) newChat(); });
   el('btn-collapse').addEventListener('click', toggleSidebar);
+  el('btn-sidebar-reopen')?.addEventListener('click', toggleSidebar);
   el('nav-home').addEventListener('click', () => showPanel('home'));
   el('nav-settings').addEventListener('click', () => showPanel('settings'));
   el('btn-community')?.addEventListener('click', () => openModal('modal-community'));
