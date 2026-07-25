@@ -10,6 +10,7 @@ local HttpService = game:GetService("HttpService")
 local ScriptEditorService = game:GetService("ScriptEditorService")
 local ChangeHistoryService = game:GetService("ChangeHistoryService")
 local Selection = game:GetService("Selection")
+local LogService = game:GetService("LogService")
 
 local toolbar = plugin:CreateToolbar("AI Connector")
 local button = toolbar:CreateButton("AIConnector", "Open Zenith AI Connector", "", "AI Connector")
@@ -161,6 +162,46 @@ local function resolveParent(path)
         end
     end
     return current, name
+end
+
+-- Creation commands accept either:
+--   { path = "StarterGui.MainGui" }
+-- or the less ambiguous:
+--   { parent = "StarterGui", name = "MainGui" }
+-- The latter avoids the model accidentally treating a parent as the object path.
+local function resolveCreateTarget(args)
+    local explicitParent = normalizePath(args and args.parent)
+    local explicitName = tostring(args and args.name or ""):gsub("^%s+", ""):gsub("%s+$", "")
+    if explicitParent == "" and explicitName ~= "" then
+        local parent = resolveFull(args and args.path)
+        if not parent then
+            return nil, nil, normalizePath(args and args.path), "Parent not found: " .. normalizePath(args and args.path)
+        end
+        if string.find(explicitName, ".", 1, true) then
+            return nil, nil, nil, "name must not contain '.'; use parent for the container path"
+        end
+        return parent, explicitName, parent:GetFullName() .. "." .. explicitName, nil
+    end
+    if explicitParent ~= "" or explicitName ~= "" then
+        if explicitParent == "" or explicitName == "" then
+            return nil, nil, nil, "Both parent and name are required"
+        end
+        if string.find(explicitName, ".", 1, true) then
+            return nil, nil, nil, "name must not contain '.'; use parent for the container path"
+        end
+        local parent = resolveFull(explicitParent)
+        if not parent then
+            return nil, nil, nil, "Parent not found: " .. explicitParent
+        end
+        return parent, explicitName, explicitParent .. "." .. explicitName, nil
+    end
+
+    local path = normalizePath(args and args.path)
+    local parent, name = resolveParent(path)
+    if not parent then
+        return nil, nil, path, "Parent not found for path: " .. path
+    end
+    return parent, name, path, nil
 end
 
 local function writeSource(target, source)
@@ -407,7 +448,109 @@ local function findInstances(root, query, wantedClass, maxResults)
     return results
 end
 
-local function createChildTree(parent, spec, created)
+local function searchScripts(root, query, maxResults)
+    local results = {}
+    local loweredQuery = string.lower(tostring(query or ""))
+    local function visit(target)
+        if #results >= maxResults then
+            return
+        end
+        if target:IsA("LuaSourceContainer") then
+            local path = target:GetFullName()
+            local sourceOk, source = pcall(function()
+                return target.Source
+            end)
+            source = sourceOk and tostring(source or "") or ""
+            local haystack = string.lower(target.Name .. "\n" .. path .. "\n" .. source)
+            if loweredQuery == "" or string.find(haystack, loweredQuery, 1, true) then
+                table.insert(results, {
+                    name = target.Name,
+                    className = target.ClassName,
+                    path = path,
+                })
+            end
+        end
+        for _, child in ipairs(target:GetChildren()) do
+            if #results >= maxResults then
+                break
+            end
+            visit(child)
+        end
+    end
+    visit(root)
+    return results
+end
+
+local function formatSource(source)
+    local formatted = tostring(source or ""):gsub("\r\n?", "\n")
+    formatted = formatted:gsub("[ \t]+\n", "\n")
+    formatted = formatted:gsub("[ \t]+$", "")
+    return formatted
+end
+
+local function detectSystems(root)
+    local systems = {}
+    local scriptQueries = {
+        Leaderstats = "leaderstats",
+        DataStores = "datastore",
+        RoundSystems = "round",
+        CombatSystems = "combat",
+        InventorySystems = "inventory",
+    }
+    for systemName, query in pairs(scriptQueries) do
+        local matches = searchScripts(root, query, 20)
+        systems[systemName] = {
+            detected = #matches > 0,
+            matches = matches,
+        }
+    end
+    systems.RemoteEvents = {
+        detected = false,
+        matches = findInstances(root, "", "RemoteEvent", 50),
+    }
+    systems.RemoteEvents.detected = #systems.RemoteEvents.matches > 0
+    systems.RemoteFunctions = {
+        detected = false,
+        matches = findInstances(root, "", "RemoteFunction", 50),
+    }
+    systems.RemoteFunctions.detected = #systems.RemoteFunctions.matches > 0
+    systems.GUIs = {
+        detected = false,
+        matches = findInstances(root, "", "ScreenGui", 50),
+    }
+    systems.GUIs.detected = #systems.GUIs.matches > 0
+    return systems
+end
+
+local createChildTree
+
+local function createInstance(parent, name, className, properties, children)
+    local ok, instanceOrError = pcall(function()
+        return Instance.new(tostring(className))
+    end)
+    if not ok then
+        return nil, "Invalid className: " .. tostring(instanceOrError)
+    end
+    local instance = instanceOrError
+    instance.Name = name
+    local propertiesOk, _, propertyErrors = applyProperties(instance, properties)
+    if not propertiesOk then
+        instance:Destroy()
+        return nil, "Could not set properties: " .. HttpService:JSONEncode(propertyErrors)
+    end
+    instance.Parent = parent
+    local created = { instance:GetFullName() }
+    for _, childSpec in ipairs(children or {}) do
+        local child, childError = createChildTree(instance, childSpec, created)
+        if not child then
+            instance:Destroy()
+            return nil, childError
+        end
+    end
+    return instance, created
+end
+
+createChildTree = function(parent, spec, created)
     if type(spec) ~= "table" or not spec.name or not spec.className then
         return nil, "Each child requires name and className"
     end
@@ -435,7 +578,7 @@ local function createChildTree(parent, spec, created)
     return instance
 end
 
-local function executeCommand(command)
+local function executeCommandRaw(command)
     if not command or not command.type then
         return { success = false, error = "Invalid command" }
     end
@@ -490,6 +633,15 @@ local function executeCommand(command)
         end
         log("get_selection: " .. tostring(#selected) .. " objects")
         return { success = true, selection = selected, count = #selected }
+    elseif commandType == "search_scripts" then
+        local root = args.path and resolveFull(args.path) or game
+        if not root then
+            return { success = false, error = "Not found: " .. tostring(args.path) }
+        end
+        local maxResults = math.min(math.max(numberOr(args.maxResults, 100), 1), 500)
+        local results = searchScripts(root, args.query, maxResults)
+        log("search_scripts: " .. tostring(#results) .. " matches")
+        return { success = true, results = results, count = #results }
     elseif commandType == "read_script" then
         local path = normalizePath(args.path)
         local target = resolveFull(path)
@@ -501,6 +653,53 @@ local function executeCommand(command)
         end
         log("read_script: " .. path)
         return { success = true, path = target:GetFullName(), source = target.Source }
+    elseif commandType == "append_script" or commandType == "format_script" then
+        local path = normalizePath(args.path)
+        local target = resolveFull(path)
+        if not target then
+            return { success = false, error = "Not found: " .. path }
+        end
+        if not target:IsA("LuaSourceContainer") then
+            return { success = false, error = "Not a script: " .. path }
+        end
+        local source = target.Source
+        if commandType == "append_script" then
+            if type(args.source) ~= "string" or args.source == "" then
+                return { success = false, error = "source is required for append_script" }
+            end
+            local separator = source == "" or source:sub(-1) == "\n" and "" or "\n"
+            source = source .. separator .. args.source
+        end
+        source = formatSource(source)
+        local wrote, writeError = writeSource(target, source)
+        if not wrote then
+            return { success = false, error = "Could not write script source: " .. writeError }
+        end
+        pcall(function()
+            ChangeHistoryService:SetWaypoint("Zenith " .. commandType .. " " .. path)
+        end)
+        log(commandType .. ": " .. path)
+        return { success = true, path = target:GetFullName(), source = source }
+    elseif commandType == "create_module" then
+        local parent, name, path, targetError = resolveCreateTarget(args)
+        if not parent then
+            return { success = false, error = targetError or "Invalid module target" }
+        end
+        if parent:FindFirstChild(name) then
+            return { success = false, error = "Object already exists: " .. path }
+        end
+        local newScript = Instance.new("ModuleScript")
+        newScript.Name = name
+        newScript.Parent = parent
+        local wrote, writeError = writeSource(newScript, args.source or "return {}")
+        if not wrote then
+            newScript:Destroy()
+            return { success = false, error = "Could not write module source: " .. writeError }
+        end
+        pcall(function()
+            ChangeHistoryService:SetWaypoint("Zenith create_module " .. path)
+        end)
+        return { success = true, path = newScript:GetFullName(), name = name, className = "ModuleScript" }
     elseif commandType == "get_properties" then
         local path = normalizePath(args.path)
         local target = resolveFull(path)
@@ -517,6 +716,17 @@ local function executeCommand(command)
             properties = properties,
             attributes = attributes,
         }
+    elseif commandType == "get_attributes" then
+        local path = normalizePath(args.path)
+        local target = resolveFull(path)
+        if not target then
+            return { success = false, error = "Not found: " .. path }
+        end
+        local attributes = {}
+        for name, value in pairs(target:GetAttributes()) do
+            attributes[name] = encodeValue(value)
+        end
+        return { success = true, path = target:GetFullName(), attributes = attributes }
     elseif commandType == "create_script" then
         local path = normalizePath(args.path)
         local scriptType = args.type or "Script"
@@ -612,10 +822,9 @@ local function executeCommand(command)
             errors = errors,
         }
     elseif commandType == "create_instance" or commandType == "create_gui" then
-        local path = normalizePath(args.path)
-        local parent, name = resolveParent(path)
+        local parent, name, path, targetError = resolveCreateTarget(args)
         if not parent then
-            return { success = false, error = "Parent not found for path: " .. path }
+            return { success = false, error = targetError or "Invalid creation target" }
         end
         if parent:FindFirstChild(name) then
             return { success = false, error = "Object already exists: " .. path }
@@ -624,33 +833,159 @@ local function executeCommand(command)
         if not className then
             return { success = false, error = "Missing className" }
         end
-        local ok, instanceOrError = pcall(function()
-            return Instance.new(tostring(className))
-        end)
-        if not ok then
-            return { success = false, error = "Invalid className: " .. tostring(instanceOrError) }
-        end
-        local instance = instanceOrError
-        instance.Name = name
-        local propertiesOk, _, propertyErrors = applyProperties(instance, args.properties)
-        if not propertiesOk then
-            instance:Destroy()
-            return { success = false, error = "Could not set properties: " .. HttpService:JSONEncode(propertyErrors) }
-        end
-        instance.Parent = parent
-        local created = { instance:GetFullName() }
-        for _, childSpec in ipairs(args.children or {}) do
-            local child, childError = createChildTree(instance, childSpec, created)
-            if not child then
-                instance:Destroy()
-                return { success = false, error = childError }
-            end
+        local instance, createdOrError = createInstance(
+            parent,
+            name,
+            className,
+            args.properties,
+            args.children
+        )
+        if not instance then
+            return { success = false, error = createdOrError }
         end
         pcall(function()
             ChangeHistoryService:SetWaypoint("Zenith " .. commandType .. " " .. path)
         end)
-        log(commandType .. ": " .. path .. " (" .. tostring(#created) .. " instances)")
-        return { success = true, path = instance:GetFullName(), className = instance.ClassName, created = created }
+        log(commandType .. ": " .. path .. " (" .. tostring(#createdOrError) .. " instances)")
+        return { success = true, path = instance:GetFullName(), className = instance.ClassName, created = createdOrError }
+    elseif commandType == "create_ui_element" or commandType == "update_ui_element" then
+        if commandType == "update_ui_element" then
+            local path = normalizePath(args.path)
+            local target = resolveFull(path)
+            if not target then
+                return { success = false, error = "Not found: " .. path }
+            end
+            if not target:IsA("GuiObject") and not target:IsA("UIBase") then
+                return { success = false, error = "Target is not a UI element: " .. path }
+            end
+            local ok, applied, errors = applyProperties(target, args.properties)
+            if ok then
+                pcall(function()
+                    ChangeHistoryService:SetWaypoint("Zenith update_ui_element " .. path)
+                end)
+            end
+            return {
+                success = ok,
+                path = target:GetFullName(),
+                applied = applied,
+                errors = errors,
+                error = ok and nil or "One or more UI properties could not be set",
+            }
+        end
+        local parent = resolveFull(args.parent or args.path)
+        local name = tostring(args.name or "")
+        if not parent then
+            return { success = false, error = "Parent not found: " .. tostring(args.parent or args.path) }
+        end
+        if name == "" then
+            return { success = false, error = "name is required" }
+        end
+        if parent:FindFirstChild(name) then
+            return { success = false, error = "Object already exists: " .. parent:GetFullName() .. "." .. name }
+        end
+        if not args.className then
+            return { success = false, error = "Missing className" }
+        end
+        local instance, createdOrError = createInstance(parent, name, args.className, args.properties, args.children)
+        if not instance then
+            return { success = false, error = createdOrError }
+        end
+        return { success = true, path = instance:GetFullName(), className = instance.ClassName, created = createdOrError }
+    elseif commandType == "create_folder"
+        or commandType == "create_part"
+        or commandType == "create_model"
+        or commandType == "create_spawn"
+        or commandType == "create_remote_event"
+        or commandType == "create_remote_function" then
+        local classByCommand = {
+            create_folder = "Folder",
+            create_part = "Part",
+            create_model = "Model",
+            create_spawn = "SpawnLocation",
+            create_remote_event = "RemoteEvent",
+            create_remote_function = "RemoteFunction",
+        }
+        local parent, name, path, targetError = resolveCreateTarget(args)
+        if not parent then
+            return { success = false, error = targetError or "Invalid creation target" }
+        end
+        if parent:FindFirstChild(name) then
+            return { success = false, error = "Object already exists: " .. path }
+        end
+        local instance, createdOrError = createInstance(
+            parent,
+            name,
+            classByCommand[commandType],
+            args.properties,
+            args.children
+        )
+        if not instance then
+            return { success = false, error = createdOrError }
+        end
+        pcall(function()
+            ChangeHistoryService:SetWaypoint("Zenith " .. commandType .. " " .. path)
+        end)
+        return { success = true, path = instance:GetFullName(), className = instance.ClassName, created = createdOrError }
+    elseif commandType == "rename_instance" then
+        local path = normalizePath(args.path)
+        local target = resolveFull(path)
+        local name = tostring(args.name or ""):gsub("^%s+", ""):gsub("%s+$", "")
+        if not target then
+            return { success = false, error = "Not found: " .. path }
+        end
+        if name == "" or string.find(name, ".", 1, true) then
+            return { success = false, error = "A simple name without '.' is required" }
+        end
+        if target.Parent and target.Parent:FindFirstChild(name) then
+            return { success = false, error = "Object already exists: " .. target.Parent:GetFullName() .. "." .. name }
+        end
+        local ok, err = pcall(function()
+            target.Name = name
+        end)
+        if not ok then
+            return { success = false, error = tostring(err) }
+        end
+        pcall(function()
+            ChangeHistoryService:SetWaypoint("Zenith rename_instance " .. path)
+        end)
+        return { success = true, path = target:GetFullName(), name = target.Name }
+    elseif commandType == "get_output_logs" then
+        local maxResults = math.min(math.max(numberOr(args.maxResults, 100), 1), 500)
+        local logs = {}
+        local ok, history = pcall(function()
+            return LogService:GetLogHistory()
+        end)
+        if not ok then
+            return { success = false, error = "Studio log history unavailable: " .. tostring(history) }
+        end
+        for index = math.max(1, #history - maxResults + 1), #history do
+            local item = history[index]
+            table.insert(logs, {
+                message = item.message,
+                messageType = tostring(item.messageType),
+            })
+        end
+        return { success = true, logs = logs, count = #logs }
+    elseif commandType == "clear_output" then
+        return { success = false, error = "Roblox Studio does not expose a supported clear-output API to plugins." }
+    elseif commandType == "save_place" then
+        return { success = false, error = "Saving the place requires Studio UI permission and is not exposed by the supported Plugin API." }
+    elseif commandType == "detect_systems" or commandType == "analyze_project" or commandType == "summarize_project" then
+        local systems = detectSystems(game)
+        if commandType == "detect_systems" then
+            return { success = true, systems = systems }
+        end
+        local tree, count, truncated = buildTree(game, 4, 500)
+        local scriptCount = #searchScripts(game, "", 500)
+        local summary = {
+            placeId = game.PlaceId,
+            placeName = game.Name,
+            treeNodes = count,
+            treeTruncated = truncated,
+            scriptCount = scriptCount,
+            systems = systems,
+        }
+        return { success = true, summary = summary, tree = commandType == "analyze_project" and tree or nil }
     elseif commandType == "move_instance" then
         local path = normalizePath(args.path)
         local target = resolveFull(path)
@@ -732,6 +1067,30 @@ local function executeCommand(command)
     end
 
     return { success = false, error = "Unknown command type: " .. tostring(commandType) }
+end
+
+-- Keep the wire contract stable for every command, including older commands
+-- that historically returned their fields at the top level.
+local function executeCommand(command)
+    local ok, raw = pcall(function()
+        return executeCommandRaw(command)
+    end)
+    if not ok then
+        return { success = false, data = nil, error = tostring(raw) }
+    end
+    if type(raw) ~= "table" then
+        return { success = false, data = nil, error = "Command returned an invalid result" }
+    end
+    if raw.success == false then
+        return { success = false, data = nil, error = tostring(raw.error or "Studio command failed.") }
+    end
+    local data = {}
+    for key, value in pairs(raw) do
+        if key ~= "success" and key ~= "error" then
+            data[key] = value
+        end
+    end
+    return { success = true, data = data, error = nil }
 end
 
 local function request(endpoint, body)
