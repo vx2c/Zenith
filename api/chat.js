@@ -238,10 +238,15 @@ async function streamWithCollection(messages, apiKey, model) {
         },
         body: JSON.stringify({ model: m, stream: true, max_tokens: 4096, messages }),
       });
-    } catch { continue; }
+    } catch (err) {
+      console.warn(`[chat/collect] model ${m} network error: ${err.message} — trying next`);
+      continue;
+    }
 
     if (!upRes.ok) {
-      console.warn(`[chat/collect] model ${m} returned HTTP ${upRes.status} — trying next`);
+      let errBody = '';
+      try { errBody = await upRes.text(); } catch { /* ignore */ }
+      console.warn(`[chat/collect] model ${m} HTTP ${upRes.status}: ${errBody.slice(0, 200)} — trying next`);
       continue;
     }
 
@@ -249,6 +254,7 @@ async function streamWithCollection(messages, apiKey, model) {
     const decoder = new TextDecoder();
     let buffer    = '';
     let full      = '';
+    let streamError = null;
 
     try {
       while (true) {
@@ -263,17 +269,26 @@ async function streamWithCollection(messages, apiKey, model) {
           if (!raw || raw === '[DONE]') continue;
           try {
             const chunk = JSON.parse(raw);
-            const text  = chunk.choices?.[0]?.delta?.content;
+            // OpenRouter sometimes returns HTTP 200 but with an error in the body
+            if (chunk.error) {
+              streamError = `${chunk.error.message || JSON.stringify(chunk.error)} (code ${chunk.error.code || '?'})`;
+              break;
+            }
+            const text = chunk.choices?.[0]?.delta?.content;
             if (text) full += text;
-          } catch { /* skip */ }
+          } catch { /* skip malformed SSE line */ }
         }
+        if (streamError) break;
       }
     } catch { /* stream interrupted */ }
 
+    if (streamError) {
+      console.warn(`[chat/collect] model ${m} in-stream error: ${streamError} — trying next`);
+      continue;
+    }
     if (full) return { model: m, text: full };
 
-    // Model returned OK but empty content — try next
-    console.warn(`[chat/collect] model ${m} returned empty — trying next`);
+    console.warn(`[chat/collect] model ${m} returned empty content — trying next`);
   }
   return null;
 }
@@ -305,19 +320,24 @@ async function plainStream(messages, apiKey, model, res) {
         },
         body: JSON.stringify({ model: m, stream: true, max_tokens: 4096, messages }),
       });
-    } catch { continue; } // network error → try next
-
-    if (!upRes.ok) {
-      // Log which model/status failed so we can debug
-      console.warn(`[chat] model ${m} returned HTTP ${upRes.status} — trying next`);
+    } catch (err) {
+      console.warn(`[chat] model ${m} network error: ${err.message} — trying next`);
       continue;
     }
 
-    const reader  = upRes.body.getReader();
-    const decoder = new TextDecoder();
+    if (!upRes.ok) {
+      let errBody = '';
+      try { errBody = await upRes.text(); } catch { /* ignore */ }
+      console.warn(`[chat] model ${m} HTTP ${upRes.status}: ${errBody.slice(0, 200)} — trying next`);
+      continue;
+    }
+
+    const reader   = upRes.body.getReader();
+    const decoder  = new TextDecoder();
     let buffer     = '';
     let sentHeader = false;
     let gotContent = false;
+    let streamErr  = null;
 
     try {
       while (true) {
@@ -332,7 +352,12 @@ async function plainStream(messages, apiKey, model, res) {
           if (!raw || raw === '[DONE]') continue;
           try {
             const chunk = JSON.parse(raw);
-            const text  = chunk.choices?.[0]?.delta?.content;
+            // Detect OpenRouter in-stream errors (HTTP 200 but error in body)
+            if (chunk.error) {
+              streamErr = `${chunk.error.message || JSON.stringify(chunk.error)} (code ${chunk.error.code || '?'})`;
+              break;
+            }
+            const text = chunk.choices?.[0]?.delta?.content;
             if (text) {
               if (!sentHeader) {
                 writeSSE(res, { provider: 'OpenRouter', model: m });
@@ -343,16 +368,20 @@ async function plainStream(messages, apiKey, model, res) {
             }
           } catch { /* skip malformed SSE line */ }
         }
+        if (streamErr) break;
       }
     } catch { /* stream interrupted — fall through */ }
 
+    if (streamErr) {
+      console.warn(`[chat] model ${m} in-stream error: ${streamErr} — trying next`);
+      continue;
+    }
     if (gotContent) {
       writeSSE(res, { done: true });
       res.end();
       return;
     }
 
-    // Model responded OK but returned no content (error in stream body, rate-limited, etc.)
     console.warn(`[chat] model ${m} returned empty content — trying next`);
   }
 
