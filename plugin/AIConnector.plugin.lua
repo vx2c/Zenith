@@ -2,7 +2,7 @@
 -- Install as: AIConnector.plugin.lua in Roblox Studio's Plugins folder.
 -- In Studio, enable Game Settings > Security > Allow HTTP Requests.
 
-local SERVER_URL = "https://xzenith.vercel.app"
+local SERVER_URL = "https://www.xzenith.net"
 local HEARTBEAT_INTERVAL = 2
 local MAX_HEARTBEAT_FAILURES = 3
 
