@@ -1,5 +1,5 @@
 // ═══════════════════════════════════════════
-//  ZENITH — Dashboard
+//  XZENITH ROBLOX — Dashboard
 // ═══════════════════════════════════════════
 
 const OAUTH_URL = 'https://apis.roblox.com/oauth/v1/authorize';
@@ -213,7 +213,7 @@ function show(id) {
 
 // ── Main Menu ─────────────────────────────────
 const MM_PHRASES = [
-  'ZENITH IA READY TO WORK',
+  'XZENITH READY TO WORK',
   'YOUR STUDIO AI COMPANION',
   'SCRIPTING MADE SMARTER',
 ];
@@ -471,7 +471,7 @@ function aiMsgEl(text, live, timestamp, model, responseMs, liked) {
   cd.className = 'msg-content';
   const nm  = document.createElement('div');
   nm.className = 'ai-name';
-  nm.textContent = 'Zenith';
+  nm.textContent = 'xZenith';
   const tx  = document.createElement('div');
   tx.className = 'ai-text';
   if (!live && text) tx.innerHTML = md(text);
@@ -709,7 +709,7 @@ async function sendMsg(content) {
       if (!fullText) fullText = '';
       const stopNote = document.createElement('p');
       stopNote.className = 'stop-note';
-      stopNote.textContent = 'Zenith stopped writing.';
+      stopNote.textContent = 'xZenith stopped writing.';
       textEl.appendChild(stopNote);
     } else {
       fullText = 'Could not reach the AI service. Please try again.';
