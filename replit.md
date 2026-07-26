@@ -394,5 +394,22 @@ Before executing any Roblox Studio modification:
 
 The agent must never directly execute create_instance, create_script or update_script without verifying the target context first.
 
+---
+
+# Development Workflow
+
+After every completed task:
+
+1. Update CHANGELOG_AI.md
+2. Explain:
+   - files changed
+   - reason
+   - implementation
+   - possible issues
+
+3. Commit changes
+
+Never postpone documentation until the end.
+
 
 **Att:** `vx2c`
