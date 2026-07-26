@@ -385,11 +385,33 @@ function extractToolCall(text) {
   if (end === -1) return null;
 
   const jsonStr = text.slice(start, end + 1);
+  let parsed;
   try {
-    return JSON.parse(jsonStr);
+    parsed = JSON.parse(jsonStr);
   } catch {
     return null;
   }
+
+  // ── Shape validation ────────────────────────────────────────────────────
+  // JSON.parse succeeding is not enough. If the model emits the wrong key
+  // (e.g. "tool" instead of "name") or a non-string/unsupported name, this
+  // used to fall through as { name: undefined, ... } and only get caught
+  // much later inside executeStudioTool → validateToolCall, after already
+  // being counted as an executed tool round (toolsExecuted++). That both
+  // produced the opaque "Unsupported Studio tool undefined" error AND
+  // prematurely flipped the agent loop into EXPLANATION_DIRECTIVE.
+  //
+  // Returning null here instead makes this indistinguishable from "no tool
+  // call at all", which routes back into the existing tool-enforcement
+  // retry path (see agentLoop) so the model gets a clean second chance to
+  // emit a correctly-shaped TOOL:{...} line — without burning a real round.
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
+  if (typeof parsed.name !== 'string' || !SUPPORTED_STUDIO_TOOLS.has(parsed.name)) return null;
+  if (parsed.args !== undefined && (typeof parsed.args !== 'object' || parsed.args === null || Array.isArray(parsed.args))) {
+    return null;
+  }
+
+  return parsed;
 }
 
 // ── Stream from OpenRouter, collecting full text ───────────────────────────
@@ -667,9 +689,24 @@ const TOOL_CALL_DIRECTIVE =
   'Do NOT write Lua code, explanations, or commentary of any kind.\n' +
   'Do NOT call more than one tool — one TOOL:{...} per response, then stop.';
 
+// CONTINUE mode — a tool has run AND the original plan still has unfinished
+// steps. Leads with "keep executing", not "respond now", so the model
+// doesn't treat the first successful TOOL_RESULT as the end of the task.
+const CONTINUE_DIRECTIVE =
+  'DIRECTIVE — CONTINUE EXECUTION MODE:\n' +
+  'You have received a TOOL_RESULT, but the plan is NOT finished yet.\n' +
+  'Do NOT write a final response. Do NOT stop here.\n' +
+  'Output ONLY the next TOOL:{...} JSON line required to complete the ' +
+  'original request (e.g. after finding/checking something, proceed to ' +
+  'create/update whatever the plan requires next).\n' +
+  'One optional "PLAN: ..." prefix line is allowed (one sentence, no code).\n' +
+  'Only skip TOOL:{...} and explain instead if the TOOL_RESULT reveals the ' +
+  'task is impossible or genuinely already complete.';
+
 const EXPLANATION_DIRECTIVE =
   'DIRECTIVE — EXPLANATION MODE:\n' +
-  'You have received a TOOL_RESULT. Respond to the developer now.\n' +
+  'You have received a TOOL_RESULT and the objective is fully satisfied. ' +
+  'Respond to the developer now.\n' +
   'WRITE tools (update_script, create_script, append_script, create_instance, etc.):\n' +
   '  • 1–2 sentences confirming what was done. Name the path or instance.\n' +
   '  • Do NOT show Lua source code. Do NOT open a code block.\n' +
@@ -678,12 +715,21 @@ const EXPLANATION_DIRECTIVE =
   '  • Summarize key findings briefly.\n' +
   '  • Show code only if the developer explicitly asked to see it.\n' +
   'ALL cases:\n' +
-  '  • If another tool is still needed, output TOOL:{...} instead of explaining.\n' +
+  '  • If, on reflection, another tool is actually still needed, output TOOL:{...} instead of explaining.\n' +
   '  • Never claim success beyond what the TOOL_RESULT confirms.\n' +
   '  • Never reproduce the full TOOL_RESULT verbatim.';
 
-function buildCallMessages(messages, toolsExecuted) {
-  const directive = toolsExecuted === 0 ? TOOL_CALL_DIRECTIVE : EXPLANATION_DIRECTIVE;
+function buildCallMessages(messages, toolsExecuted, hasPendingWork) {
+  // Three phases now instead of two:
+  //   0 tools executed yet                → TOOL_CALL_DIRECTIVE (pick first tool)
+  //   tools executed, plan still pending  → CONTINUE_DIRECTIVE  (keep going)
+  //   tools executed, nothing pending     → EXPLANATION_DIRECTIVE (wrap up)
+  const directive =
+    toolsExecuted === 0
+      ? TOOL_CALL_DIRECTIVE
+      : hasPendingWork
+        ? CONTINUE_DIRECTIVE
+        : EXPLANATION_DIRECTIVE;
   // Merge the directive INTO the first system message content rather than
   // appending a new system message at the end of the conversation.
   // Most models (including gpt-oss-20b) only honour system messages at
@@ -813,7 +859,8 @@ async function agentLoop(messages, apiKey, model, sessionId, res, needsStudio, t
   for (let round = 0; round < MAX_ROUNDS; round++) {
     // Inject the per-phase directive as the final system message so the
     // model always reads the current-phase instruction last.
-    const callMessages = buildCallMessages(messages, toolsExecuted);
+    const hasPendingWork = pendingSteps.length > 0;
+    const callMessages = buildCallMessages(messages, toolsExecuted, hasPendingWork);
     const result = await streamWithCollection(callMessages, apiKey, model);
 
     if (!result || result.error) {
