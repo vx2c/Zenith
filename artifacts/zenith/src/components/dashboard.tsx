@@ -19,6 +19,12 @@ interface TimelineEntry {
   detail?: string;
 }
 
+interface WorkspaceEvent extends TimelineEntry {
+  type?: 'plan' | 'tool' | 'task';
+  taskId?: string;
+  step?: number;
+}
+
 interface Message {
   role: 'user' | 'ai';
   content: string;
@@ -258,6 +264,16 @@ function useChat(sessionId?: string | null) {
             if (parsed.error) throw new Error(parsed.error);
             if (parsed.timeline) {
               updateTimeline(parsed.timeline as TimelineEntry);
+            }
+            if (parsed.workspace_event) {
+              updateTimeline({
+                id: parsed.workspace_event.id,
+                label: parsed.workspace_event.label,
+                status: parsed.workspace_event.status === 'completed' ? 'done' : parsed.workspace_event.status,
+                tool: parsed.workspace_event.tool,
+                detail: parsed.workspace_event.detail,
+                error: parsed.workspace_event.error,
+              } as TimelineEntry);
             }
             if (parsed.content) {
               setMessages((prev) => {

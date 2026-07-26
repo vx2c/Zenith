@@ -18,6 +18,7 @@ const REDIS_TOKEN = process.env.UPSTASH_REDIS_REST_TOKEN;
 // How long (seconds) a session lives after its last heartbeat.
 // Plugin sends heartbeat every 2s; 300s = 5 minutes of missed heartbeats before expiry.
 const SESSION_TTL = 300;
+const WORKSPACE_TASK_TTL = 900;
 
 /**
  * Execute one Redis command via the Upstash REST API.
@@ -164,6 +165,56 @@ async function getSession(sessionId) {
   return raw ? JSON.parse(raw) : null;
 }
 
+/**
+ * Persist the agent's current workspace operation. Tool results are kept
+ * briefly so a reconnecting client can rehydrate the latest task state
+ * without making the plugin/session architecture responsible for UI state.
+ */
+async function createWorkspaceTask(sessionId, { taskId, objective, plan = [] } = {}) {
+  const id = taskId || generateId();
+  const task = {
+    taskId: id,
+    sessionId,
+    objective: objective || '',
+    plan: Array.isArray(plan) ? plan : [],
+    completedSteps: [],
+    pendingSteps: [],
+    currentTool: null,
+    lastToolResult: null,
+    nextAction: 'Select the first tool needed for the objective.',
+    status: 'running',
+    events: [],
+    updatedAt: Date.now(),
+  };
+  await redisCmd('SET', `workspace-task:${sessionId}:${id}`, JSON.stringify(task), 'EX', WORKSPACE_TASK_TTL);
+  return task;
+}
+
+async function updateWorkspaceTask(sessionId, taskId, patch = {}) {
+  if (!sessionId || !taskId) return null;
+  const key = `workspace-task:${sessionId}:${taskId}`;
+  const raw = await redisCmd('GET', key);
+  if (!raw) return null;
+  const current = JSON.parse(raw);
+  const next = {
+    ...current,
+    ...patch,
+    plan: Array.isArray(patch.plan) ? patch.plan : current.plan,
+    completedSteps: Array.isArray(patch.completedSteps) ? patch.completedSteps : current.completedSteps,
+    pendingSteps: Array.isArray(patch.pendingSteps) ? patch.pendingSteps : current.pendingSteps,
+    events: Array.isArray(patch.events) ? patch.events.slice(-50) : current.events,
+    updatedAt: Date.now(),
+  };
+  await redisCmd('SET', key, JSON.stringify(next), 'EX', WORKSPACE_TASK_TTL);
+  return next;
+}
+
+async function getWorkspaceTask(sessionId, taskId) {
+  if (!sessionId || !taskId) return null;
+  const raw = await redisCmd('GET', `workspace-task:${sessionId}:${taskId}`);
+  return raw ? JSON.parse(raw) : null;
+}
+
 module.exports = {
   createSession,
   touchSession,
@@ -173,4 +224,7 @@ module.exports = {
   storeResult,
   getResult,
   getSession,
+  createWorkspaceTask,
+  updateWorkspaceTask,
+  getWorkspaceTask,
 };

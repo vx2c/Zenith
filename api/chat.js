@@ -1,6 +1,12 @@
 'use strict';
 const { DEFAULT_MODEL, OPENROUTER_BASE, FALLBACK_CHAIN } = require('./aiService');
-const { getSession, enqueueCommand, getResult } = require('./session-store');
+const {
+  getSession,
+  enqueueCommand,
+  getResult,
+  createWorkspaceTask,
+  updateWorkspaceTask,
+} = require('./session-store');
 
 // This is the allow-list implemented by AIConnector.plugin.lua. Never pass
 // an arbitrary model-generated name to the plugin: a typo should become a
@@ -762,12 +768,47 @@ function toolDetailFor(name, args) {
 }
 
 // ── Agentic loop: call AI → check for TOOL → execute → repeat ─────────────
-async function agentLoop(messages, apiKey, model, sessionId, res, needsStudio) {
+async function agentLoop(messages, apiKey, model, sessionId, res, needsStudio, task) {
   const MAX_ROUNDS = 12;        // increased for complex multi-step workflows
   const MAX_TOOL_ENFORCEMENT_RETRIES = 1; // inject reminder if tool skipped
   let headerSent = false;
   let toolEnforcementRetries = 0;
   let toolsExecuted = 0; // how many tools have actually run this turn
+  const completedSteps = [];
+  const taskEvents = [];
+  const pendingSteps = Array.isArray(task?.plan) ? [...task.plan] : [];
+
+  async function persistTask(patch) {
+    if (!task?.taskId) return;
+    try {
+      await updateWorkspaceTask(sessionId, task.taskId, {
+        ...patch,
+        completedSteps,
+        pendingSteps,
+        events: taskEvents,
+      });
+    } catch (error) {
+      // Redis persistence must never interrupt the plugin/tool execution loop.
+      console.warn(`[chat] workspace task persistence failed: ${error.message}`);
+    }
+  }
+
+  function emitWorkspaceEvent(event) {
+    const enriched = { ...event, taskId: task?.taskId, timestamp: Date.now() };
+    taskEvents.push(enriched);
+    writeSSE(res, { workspace_event: enriched });
+  }
+
+  if (task?.taskId) {
+    emitWorkspaceEvent({
+      id: 'workspace-plan',
+      type: 'plan',
+      status: 'running',
+      label: 'Planning workspace task',
+      detail: task.objective,
+    });
+    await persistTask({ status: 'running', nextAction: 'Choose the first tool required by the objective.' });
+  }
 
   for (let round = 0; round < MAX_ROUNDS; round++) {
     // Inject the per-phase directive as the final system message so the
@@ -814,6 +855,20 @@ async function agentLoop(messages, apiKey, model, sessionId, res, needsStudio) {
       }
 
       // No tool enforcement needed — this is the final answer
+      if (task?.taskId) {
+        await persistTask({
+          status: 'completed',
+          currentTool: null,
+          lastToolResult: null,
+          nextAction: 'Task complete. Review the verified result above.',
+        });
+        emitWorkspaceEvent({
+          id: 'workspace-task',
+          type: 'task',
+          status: 'completed',
+          label: 'Workspace task completed',
+        });
+      }
       streamTextToClient(res, usedModel, text, { headerAlreadySent: headerSent });
       headerSent = true;
       writeSSE(res, { done: true });
@@ -840,12 +895,39 @@ async function agentLoop(messages, apiKey, model, sessionId, res, needsStudio) {
     if (safePreText) {
       const planText = safePreText.replace(/^PLAN:\s*/i, '');
       writeSSE(res, { timeline: { id: round, label: planText, status: 'plan' } });
+      if (task?.taskId) {
+        task.plan = [...(task.plan || []), planText];
+        pendingSteps.push(planText);
+        emitWorkspaceEvent({
+          id: 'workspace-plan',
+          type: 'plan',
+          status: 'running',
+          label: 'Agent plan',
+          detail: planText,
+        });
+        await persistTask({ plan: task.plan, nextAction: planText });
+      }
     }
 
     // Timeline: tool running (mini card)
     const tlLabel  = toolLabelFor(toolCall.name);
     const tlDetail = toolDetailFor(toolCall.name, toolCall.args || {});
     writeSSE(res, { timeline: { id: round, label: tlLabel, status: 'running', tool: toolCall.name, ...(tlDetail ? { detail: tlDetail } : {}) } });
+    if (task?.taskId) {
+      emitWorkspaceEvent({
+        id: `workspace-tool-${round}`,
+        type: 'tool',
+        status: 'running',
+        tool: toolCall.name,
+        label: tlLabel,
+        detail: tlDetail,
+        step: round + 1,
+      });
+      await persistTask({
+        currentTool: toolCall.name,
+        nextAction: `Waiting for ${tlLabel.toLowerCase()} to finish.`,
+      });
+    }
 
     // Execute the tool
     const toolResult = await executeStudioTool(sessionId, toolCall.name, toolCall.args || {});
@@ -861,6 +943,32 @@ async function agentLoop(messages, apiKey, model, sessionId, res, needsStudio) {
       ...(tlDetail ? { detail: tlDetail } : {}),
       ...(isError ? { error: toolResult.error } : {}),
     } });
+    if (task?.taskId) {
+      const stepLabel = tlDetail ? `${tlLabel}: ${tlDetail}` : tlLabel;
+      if (!isError) {
+        completedSteps.push(stepLabel);
+        const pendingIndex = pendingSteps.findIndex(step => step === stepLabel || step.includes(tlLabel));
+        if (pendingIndex >= 0) pendingSteps.splice(pendingIndex, 1);
+      }
+      emitWorkspaceEvent({
+        id: `workspace-tool-${round}`,
+        type: 'tool',
+        status: isError ? 'error' : 'completed',
+        tool: toolCall.name,
+        label: tlLabel,
+        detail: tlDetail,
+        step: round + 1,
+        ...(isError ? { error: toolResult.error } : {}),
+      });
+      const serializedResult = JSON.stringify(toolResult);
+      await persistTask({
+        currentTool: null,
+        lastToolResult: serializedResult.length > 4000 ? serializedResult.slice(0, 4000) + '…' : toolResult,
+        nextAction: isError
+          ? 'Evaluate the tool error and choose a safe recovery or explain the failure.'
+          : 'Evaluate TOOL_RESULT and continue until the objective is verified.',
+      });
+    }
 
     // Inject the result back into the conversation with strong framing
     messages = [
@@ -873,6 +981,20 @@ async function agentLoop(messages, apiKey, model, sessionId, res, needsStudio) {
     ];
   }
 
+  if (task?.taskId) {
+    await persistTask({
+      status: 'blocked',
+      currentTool: null,
+      nextAction: 'Tool limit reached. Start a new request to continue the task.',
+    });
+    emitWorkspaceEvent({
+      id: 'workspace-task',
+      type: 'task',
+      status: 'error',
+      label: 'Workspace task needs continuation',
+      error: 'Tool limit reached.',
+    });
+  }
   writeSSE(res, { error: 'Demasiadas llamadas a herramientas en una respuesta. Por favor, intenta de nuevo.' });
   writeSSE(res, { done: true });
   res.end();
@@ -890,7 +1012,7 @@ module.exports = async function handler(req, res) {
   try { body = await parseJsonBody(req); }
   catch { return res.status(400).json({ error: 'Invalid JSON' }); }
 
-  const { messages = [], model = DEFAULT_MODEL, sessionId } = body;
+  const { messages = [], model = DEFAULT_MODEL, sessionId, taskId } = body;
 
   res.setHeader('Content-Type',      'text/event-stream');
   res.setHeader('Cache-Control',     'no-cache, no-transform');
@@ -920,6 +1042,14 @@ module.exports = async function handler(req, res) {
     // Used to enforce tool use and inject intent hint into the system prompt.
     const needsStudio = detectStudioIntent(messages);
     const systemPrompt = buildSystemPrompt(session, needsStudio);
+    const objective = [...messages].reverse().find(m => m.role === 'user')?.content || '';
+    let workspaceTask = null;
+    try {
+      workspaceTask = await createWorkspaceTask(sessionId, { taskId, objective });
+    } catch (error) {
+      console.warn(`[chat] workspace task initialization failed: ${error.message}`);
+      workspaceTask = { taskId: taskId || null, objective, plan: [] };
+    }
 
     const openAIMessages = [
       { role: 'system', content: systemPrompt },
@@ -929,7 +1059,7 @@ module.exports = async function handler(req, res) {
       })),
     ];
 
-    await agentLoop(openAIMessages, apiKey, model, sessionId, res, needsStudio);
+    await agentLoop(openAIMessages, apiKey, model, sessionId, res, needsStudio, workspaceTask);
     return;
   }
 

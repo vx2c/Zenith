@@ -21,6 +21,8 @@ const state = {
   activePanel:  'home',
   pluginToken:  null,   // signed session token from active Studio plugin
   pluginStatusReady: false,
+  workspaceTaskId: null,
+  workspaceEvents: [],
 };
 
 // ── Storage ──────────────────────────────────
@@ -482,7 +484,7 @@ async function sendMsg(content) {
 
   // Activity
   const panel = el('activity-panel');
-  panel.classList.remove('hidden');
+  panel.classList.toggle('hidden', !state.pluginToken);
   el('activity-body').innerHTML = '';
   el('activity-body').classList.remove('open');
   el('activity-arrow').classList.remove('flipped');
@@ -497,6 +499,9 @@ async function sendMsg(content) {
   let respModel  = '';
   const t0       = Date.now();
   let stopped    = false;
+  state.workspaceTaskId = `task-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  state.workspaceEvents = [];
+  renderWorkspaceEvents();
 
   try {
     // Build system context from modes
@@ -514,6 +519,7 @@ async function sendMsg(content) {
         messages:   allMsgs,
         systemNote: systemNote.join(' '),
         sessionId:  state.pluginToken || undefined,
+        taskId:     state.workspaceTaskId,
       }),
       signal:  state.abortCtrl.signal,
     });
@@ -544,6 +550,20 @@ async function sendMsg(content) {
             textEl.innerHTML = md(fullText);
             box.scrollTop = box.scrollHeight;
           }
+            if (parsed.workspace_event) {
+              upsertWorkspaceEvent(parsed.workspace_event);
+            }
+            if (parsed.timeline && !parsed.workspace_event) {
+              upsertWorkspaceEvent({
+                id: `timeline-${parsed.timeline.id}`,
+                type: parsed.timeline.status === 'plan' ? 'plan' : 'tool',
+                status: parsed.timeline.status === 'done' ? 'completed' : parsed.timeline.status,
+                tool: parsed.timeline.tool,
+                label: parsed.timeline.label,
+                detail: parsed.timeline.detail,
+                error: parsed.timeline.error,
+              });
+            }
           if (parsed.error) {
             fullText = parsed.error;
             textEl.innerHTML = md(fullText);
@@ -567,7 +587,8 @@ async function sendMsg(content) {
 
   stopThinkingStates();
   clearRespondingModel();
-  panel.classList.add('hidden');
+  panel.classList.toggle('hidden', !state.pluginToken);
+  el('activity-summary').textContent = stopped ? 'Workspace task stopped' : 'Workspace task complete';
 
   const responseMs = Date.now() - t0;
 
@@ -931,6 +952,44 @@ function renderActBody(groups) {
       `).join('')}
     </div>
   `).join('');
+}
+
+function upsertWorkspaceEvent(event) {
+  if (!event?.id) return;
+  const idx = state.workspaceEvents.findIndex(item => item.id === event.id);
+  if (idx >= 0) state.workspaceEvents[idx] = { ...state.workspaceEvents[idx], ...event };
+  else state.workspaceEvents.push(event);
+  renderWorkspaceEvents();
+}
+
+function renderWorkspaceEvents() {
+  const panel = el('activity-panel');
+  if (!panel) return;
+  if (!state.pluginToken) {
+    panel.classList.add('hidden');
+    return;
+  }
+  panel.classList.remove('hidden');
+  const events = state.workspaceEvents || [];
+  const completed = events.filter(e => e.status === 'completed' || e.status === 'done').length;
+  const total = events.filter(e => e.type === 'tool').length;
+  const running = events.find(e => e.status === 'running');
+  const summary = running?.label || (total ? `${completed}/${total} workspace steps complete` : 'Planning workspace task…');
+  el('activity-summary').textContent = summary;
+  el('activity-body').innerHTML = events.map(event => {
+    const status = event.status === 'done' ? 'completed' : event.status;
+    const icon = status === 'running' ? '◌' : status === 'error' ? '!' : status === 'completed' ? '✓' : '•';
+    const detail = event.detail || event.error || '';
+    return `<div class="workspace-event ${esc(status)}">
+      <span class="workspace-event-icon">${icon}</span>
+      <div class="workspace-event-copy">
+        <strong>${esc(event.label || event.type || 'Workspace activity')}</strong>
+        ${detail ? `<span>${esc(detail)}</span>` : ''}
+        <small>${status === 'running' ? 'Running' : status === 'error' ? 'Failed' : status === 'completed' ? 'Completed' : 'Planning'}</small>
+      </div>
+    </div>`;
+  }).join('');
+  if (state.actOpen) el('activity-body').classList.add('open');
 }
 
 function doSend() {
