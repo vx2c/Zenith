@@ -141,6 +141,10 @@ function buildSystemPrompt(session, needsStudio) {
     ' T11. Never invent Roblox property values, paths, or class names you haven\'t read from TOOL_RESULT.',
     ' T12. After a WRITE tool succeeds: confirm in 1–2 sentences. NEVER show the Lua source code you wrote.',
     ' T13. After a READ tool succeeds: summarize findings. Show code only if the developer asked to see it.',
+    ' T14. NEVER put a Script/LocalScript/ModuleScript with a "source" field inside create_instance/create_gui ' +
+      '"children" — nested children do NOT execute source and will be created EMPTY. Build the instance tree ' +
+      'first (structure only, no scripts), THEN call create_script separately for each script\'s logic, using ' +
+      'the exact path you just created.',
     '',
     'Available tools:',
     '  TOOL:{"name":"ping","args":{}}',
@@ -187,6 +191,7 @@ function buildSystemPrompt(session, needsStudio) {
     '  TOOL:{"name":"create_instance","args":{"parent":"StarterGui","name":"MainGui","className":"ScreenGui","properties":{"ResetOnSpawn":false},"children":[{"name":"Title","className":"TextLabel","properties":{"Text":"Welcome","Size":{"type":"UDim2","x":{"scale":0,"offset":300},"y":{"scale":0,"offset":60}}}}]}}',
     '    → Creates an Instance and optional nested children. REQUIRED: parent, name, className.',
     '    → className must be a valid Roblox class name (e.g. ScreenGui, TextLabel, Part, Frame, RemoteEvent).',
+    '    → children are for structural instances ONLY (Frames, TextLabels, TextButtons, etc.). Do NOT put a Script/LocalScript/ModuleScript with "source" here — see T14. Add scripts afterward with a separate create_script call.',
     '',
     '  TOOL:{"name":"set_attributes","args":{"path":"Workspace.Part","attributes":{"ZenithManaged":true,"Role":"Spawn"}}}',
     '    → Sets custom Attributes on an Instance.',
@@ -412,6 +417,51 @@ function extractToolCall(text) {
   }
 
   return parsed;
+}
+
+// ── Diagnose WHY extractToolCall returned null ─────────────────────────────
+// "No TOOL: marker at all" and "wrote a TOOL: but the JSON was broken" need
+// different corrective feedback. Lumping them together (as the old code did)
+// meant a model that tried a complex nested payload and mangled the JSON
+// got the same generic "you must use a tool" nudge as a model that just
+// forgot to call one — which doesn't help it avoid repeating the mistake,
+// and small/free models attempting large nested create_instance payloads
+// with embedded Lua source strings are exactly the case that breaks this way.
+function describeToolCallFailure(text) {
+  const prefix = 'TOOL:';
+  const idx = text.indexOf(prefix);
+  if (idx === -1) return { attempted: false };
+
+  let start = idx + prefix.length;
+  while (start < text.length && /\s/.test(text[start])) start++;
+  if (text[start] !== '{') return { attempted: true, reason: 'malformed', detail: 'TOOL: was not followed by a JSON object.' };
+
+  let depth = 0, inString = false, escape = false, end = -1;
+  for (let i = start; i < text.length; i++) {
+    const ch = text[i];
+    if (escape) { escape = false; continue; }
+    if (ch === '\\' && inString) { escape = true; continue; }
+    if (ch === '"') { inString = !inString; continue; }
+    if (inString) continue;
+    if (ch === '{') depth++;
+    else if (ch === '}') { depth--; if (depth === 0) { end = i; break; } }
+  }
+  if (end === -1) return { attempted: true, reason: 'malformed', detail: 'The TOOL:{...} JSON was never closed (unbalanced braces).' };
+
+  const jsonStr = text.slice(start, end + 1);
+  let parsed;
+  try {
+    parsed = JSON.parse(jsonStr);
+  } catch (e) {
+    return { attempted: true, reason: 'malformed', detail: `Invalid JSON syntax: ${e.message}` };
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    return { attempted: true, reason: 'shape', detail: 'TOOL: JSON must be an object, not an array or primitive.' };
+  }
+  if (typeof parsed.name !== 'string' || !SUPPORTED_STUDIO_TOOLS.has(parsed.name)) {
+    return { attempted: true, reason: 'shape', detail: `"name" must be one of the supported tools (got ${JSON.stringify(parsed.name)}).` };
+  }
+  return { attempted: true, reason: 'shape', detail: '"args" must be a JSON object.' };
 }
 
 // ── Stream from OpenRouter, collecting full text ───────────────────────────
@@ -665,10 +715,19 @@ function buildToolResultMessage(toolName, toolResult, isError) {
 // ── Detect when AI skipped a required tool ────────────────────────────────
 // If we're in studio mode, the request clearly needed a tool, and the AI
 // responded with no TOOL: call, inject a reminder and retry once.
-function buildToolEnforcementMessage(userContent) {
+function buildToolEnforcementMessage(userContent, failure) {
+  const detail = failure?.attempted
+    ? `Your last TOOL: attempt was invalid — ${failure.detail}\n` +
+      `Do NOT retry the exact same payload. Simplify it.\n` +
+      `IMPORTANT: create_instance/create_gui "children" do NOT support a "source" ` +
+      `field — nested Script/LocalScript/ModuleScript children are created EMPTY. ` +
+      `Never put Lua code inside a nested child. Create the instance tree first ` +
+      `(no source), then call create_script separately for any script logic.\n\n`
+    : '';
   return (
-    `SYSTEM: Your last response did not include a TOOL: call, but the developer's request ` +
+    `SYSTEM: Your last response did not include a valid TOOL: call, but the developer's request ` +
     `requires a Studio action:\n"${userContent}"\n\n` +
+    detail +
     `You MUST use a tool. Do NOT describe the action or write example code instead.\n` +
     `Look at the available tools in the system prompt and call the appropriate one now.\n` +
     `Output ONLY the TOOL:{...} line.`
@@ -816,7 +875,7 @@ function toolDetailFor(name, args) {
 // ── Agentic loop: call AI → check for TOOL → execute → repeat ─────────────
 async function agentLoop(messages, apiKey, model, sessionId, res, needsStudio, task) {
   const MAX_ROUNDS = 12;        // increased for complex multi-step workflows
-  const MAX_TOOL_ENFORCEMENT_RETRIES = 1; // inject reminder if tool skipped
+  const MAX_TOOL_ENFORCEMENT_RETRIES = 2; // inject reminder if tool skipped/malformed
   let headerSent = false;
   let toolEnforcementRetries = 0;
   let toolsExecuted = 0; // how many tools have actually run this turn
@@ -878,7 +937,9 @@ async function agentLoop(messages, apiKey, model, sessionId, res, needsStudio, t
     const toolCall = extractToolCall(text);
 
     if (!toolCall) {
-      // ── Tool enforcement: AI skipped a required tool ──────────────────
+      const failure = describeToolCallFailure(text);
+
+      // ── Tool enforcement: AI skipped a required tool, or botched the JSON ──
       // Only enforce on the first round, and only if intent detection says
       // a Studio action was required.
       if (needsStudio && toolsExecuted === 0 && round < MAX_ROUNDS - 1 && toolEnforcementRetries < MAX_TOOL_ENFORCEMENT_RETRIES) {
@@ -895,26 +956,44 @@ async function agentLoop(messages, apiKey, model, sessionId, res, needsStudio, t
           messages = [
             ...messages,
             { role: 'assistant', content: text },
-            { role: 'user', content: buildToolEnforcementMessage(lastUserMsg.content) },
+            { role: 'user', content: buildToolEnforcementMessage(lastUserMsg.content, failure) },
           ];
           continue;
         }
       }
 
-      // No tool enforcement needed — this is the final answer
+      // No tool enforcement possible/left, and nothing ever actually ran.
+      // Do NOT report this as a completed task — that was misleading the
+      // developer into thinking Studio was updated when the plugin never
+      // even received a command. Report it as failed instead.
+      const neverExecuted = toolsExecuted === 0;
       if (task?.taskId) {
         await persistTask({
-          status: 'completed',
+          status: neverExecuted ? 'failed' : 'completed',
           currentTool: null,
           lastToolResult: null,
-          nextAction: 'Task complete. Review the verified result above.',
+          nextAction: neverExecuted
+            ? 'The AI could not produce a valid tool call. Try again, possibly with a simpler request.'
+            : 'Task complete. Review the verified result above.',
         });
         emitWorkspaceEvent({
           id: 'workspace-task',
           type: 'task',
-          status: 'completed',
-          label: 'Workspace task completed',
+          status: neverExecuted ? 'error' : 'completed',
+          label: neverExecuted ? 'Workspace task failed — no Studio action was executed' : 'Workspace task completed',
+          ...(neverExecuted && failure?.detail ? { error: failure.detail } : {}),
         });
+      }
+      if (neverExecuted && needsStudio) {
+        writeSSE(res, {
+          error:
+            'Zenith could not generate a valid Studio command for this request ' +
+            '(the AI\'s tool call was malformed). Nothing was changed in Studio. ' +
+            'Try rephrasing, or ask for a simpler step at a time.',
+        });
+        writeSSE(res, { done: true });
+        res.end();
+        return;
       }
       streamTextToClient(res, usedModel, text, { headerAlreadySent: headerSent });
       headerSent = true;
