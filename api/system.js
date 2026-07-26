@@ -144,6 +144,28 @@ async function handleRobloxCallback(req, res) {
 
     const tokenData = await tokenRes.json();
     const claims    = tokenData.id_token ? decodeJwtPayload(tokenData.id_token) : {};
+    const userId    = claims.sub || null;
+
+    // Fetch the profile picture too, so the client never has to make a
+    // second round trip before it can show a real avatar. Previously this
+    // field was simply never populated — roblox-callback.html's
+    // `if (data.picture) ...` check silently no-op'd on every login, so
+    // the Main Menu always fell back to the initial-letter placeholder.
+    let picture = null;
+    if (userId) {
+      try {
+        const thumbRes = await fetch(
+          `https://thumbnails.roblox.com/v1/users/avatar-headshot?userIds=${encodeURIComponent(userId)}&size=150x150&format=Png`,
+        );
+        if (thumbRes.ok) {
+          const thumbData = await thumbRes.json();
+          picture = thumbData?.data?.[0]?.imageUrl || null;
+        }
+      } catch {
+        // Non-fatal — the client falls back to the initial-letter avatar,
+        // and initApp()/loadAvatar() will retry via /api/avatar later.
+      }
+    }
 
     return res.status(200).json({
       accessToken:  tokenData.access_token,
@@ -153,7 +175,8 @@ async function handleRobloxCallback(req, res) {
       scope:        tokenData.scope,
       displayName:  claims.name || tokenData.displayName || null,
       username:     claims.preferred_username || null,
-      userId:       claims.sub || null,
+      userId,
+      picture,
     });
   } catch (e) {
     return res.status(500).json({ error: 'Unable to complete OAuth exchange', details: e.message });
