@@ -70,6 +70,113 @@ function setLang(lang) {
   if (lEl) lEl.classList.add('active');
 }
 
+// ── Wave background (canvas) ──────────────────────────
+// Shared by the landing screen and the main menu — layered monochrome
+// sine waves, like ink moving on dark water. Each call owns its own
+// rAF loop and cleans itself up if called again on a resized/hidden canvas.
+const _waveLoops = new WeakMap();
+
+function initWaveCanvas(canvas, opts = {}) {
+  if (!canvas) return;
+  // Avoid stacking a second rAF loop if this canvas is already animating.
+  if (_waveLoops.has(canvas)) return;
+
+  const ctx = canvas.getContext('2d');
+  const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const layers = opts.layers || [
+    { amp: 22, freq: 0.010, speed: 0.012, y: 0.60, alpha: 0.06 },
+    { amp: 30, freq: 0.007, speed: -0.009, y: 0.70, alpha: 0.05 },
+    { amp: 16, freq: 0.016, speed: 0.017, y: 0.80, alpha: 0.08 },
+    { amp: 12, freq: 0.024, speed: -0.021, y: 0.90, alpha: 0.12 },
+  ];
+
+  let w = 0, h = 0, dpr = 1, raf = null;
+
+  function resize() {
+    dpr = Math.min(window.devicePixelRatio || 1, 2);
+    w = canvas.clientWidth;
+    h = canvas.clientHeight;
+    if (w === 0 || h === 0) return;
+    canvas.width  = Math.round(w * dpr);
+    canvas.height = Math.round(h * dpr);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+
+  function drawLayer(layer, t) {
+    if (!w || !h) return;
+    const baseY = h * layer.y;
+    ctx.beginPath();
+    ctx.moveTo(0, h);
+    ctx.lineTo(0, baseY);
+    for (let x = 0; x <= w; x += 8) {
+      const y = baseY
+        + Math.sin(x * layer.freq + t * layer.speed) * layer.amp
+        + Math.sin(x * layer.freq * 2.2 + t * layer.speed * 1.6) * (layer.amp * 0.3);
+      ctx.lineTo(x, y);
+    }
+    ctx.lineTo(w, h);
+    ctx.closePath();
+    ctx.fillStyle = `rgba(255,255,255,${layer.alpha})`;
+    ctx.fill();
+  }
+
+  function frame(now) {
+    if (w && h) {
+      ctx.clearRect(0, 0, w, h);
+      layers.forEach(l => drawLayer(l, now));
+    }
+    if (!reduceMotion) raf = requestAnimationFrame(frame);
+  }
+
+  resize();
+  const onResize = () => resize();
+  window.addEventListener('resize', onResize);
+  raf = requestAnimationFrame(frame);
+  if (reduceMotion) frame(0); // one static frame, no loop
+
+  _waveLoops.set(canvas, { stop() { if (raf) cancelAnimationFrame(raf); window.removeEventListener('resize', onResize); } });
+}
+
+// ── Typewriter helper (delete + retype through a list of phrases) ──────
+function startTypewriter(el, phrases, opts = {}) {
+  if (!el || !phrases || !phrases.length) return;
+  const typeMs = opts.typeMs ?? 55;
+  const eraseMs = opts.eraseMs ?? 28;
+  const holdMs = opts.holdMs ?? 1800;
+  const pauseMs = opts.pauseMs ?? 500;
+  let phraseIdx = 0, charIdx = 0, deleting = false;
+  function loop() {
+    const phrase = phrases[phraseIdx % phrases.length];
+    if (!deleting) {
+      el.textContent = phrase.slice(0, charIdx + 1);
+      charIdx++;
+      if (charIdx >= phrase.length) { deleting = true; setTimeout(loop, holdMs); return; }
+      setTimeout(loop, typeMs);
+    } else {
+      el.textContent = phrase.slice(0, charIdx - 1);
+      charIdx--;
+      if (charIdx <= 0) { deleting = false; phraseIdx++; setTimeout(loop, pauseMs); return; }
+      setTimeout(loop, eraseMs);
+    }
+  }
+  loop();
+}
+
+const LANDING_PHRASES = [
+  'hola soy una asistente de IA que se conecta a tus proyectos de roblox',
+  'puedo crear scripts, guis e instancias directo en tu studio',
+  'leo tu explorer real y ejecuto cambios reales, nunca inventados',
+];
+
+function initLandingChat() {
+  const el = document.getElementById('landing-typewriter');
+  if (el && !el.dataset.started) {
+    el.dataset.started = '1';
+    startTypewriter(el, LANDING_PHRASES);
+  }
+}
+
+
 // ── Boot ─────────────────────────────────────
 document.addEventListener('DOMContentLoaded', () => {
   applyTheme(getSetting('theme', 'light'));
@@ -94,6 +201,14 @@ function show(id) {
   ['landing', 'main-menu', 'app'].forEach(s =>
     document.getElementById(s).classList.toggle('hidden', s !== id)
   );
+  if (id === 'landing') {
+    requestAnimationFrame(() => {
+      initWaveCanvas(el('landing-waves'));
+      initLandingChat();
+    });
+  } else if (id === 'main-menu') {
+    requestAnimationFrame(() => initWaveCanvas(el('mm-waves')));
+  }
 }
 
 // ── Main Menu ─────────────────────────────────
@@ -104,17 +219,34 @@ const MM_PHRASES = [
 ];
 
 function initMainMenu() {
-  const { displayName, avatarUrl } = getUser();
+  const { displayName, avatarUrl, userId } = getUser();
   el('mm-username').textContent = displayName || 'Developer';
 
   // Avatar
   const img = el('mm-avatar-img');
   const fb  = el('mm-avatar-fallback');
   fb.textContent = (displayName || 'D').charAt(0).toUpperCase();
-  if (avatarUrl) {
-    img.src = avatarUrl;
+  function showAvatar(url) {
+    if (!url) return;
+    img.src = url;
     img.onload  = () => { img.style.display = 'block'; fb.style.display = 'none'; };
     img.onerror = () => { img.style.display = 'none';  fb.style.display = ''; };
+  }
+  if (avatarUrl) {
+    showAvatar(avatarUrl);
+  } else if (userId) {
+    // Defense in depth: the OAuth callback should have already stashed the
+    // avatar, but for older cached sessions (or if that fetch failed
+    // server-side) fetch it directly so the fallback letter isn't permanent.
+    fetch(`/api/avatar?userId=${encodeURIComponent(userId)}`)
+      .then(r => r.ok ? r.json() : null)
+      .then(data => {
+        if (data?.imageUrl) {
+          localStorage.setItem('roblox_avatar', data.imageUrl);
+          showAvatar(data.imageUrl);
+        }
+      })
+      .catch(() => {});
   }
 
   // Typewriter
