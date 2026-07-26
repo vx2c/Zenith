@@ -133,6 +133,21 @@ Nunca sobrescribir registros anteriores. Siempre agregar la nueva entrada al fin
 - Motivo:
   - Preparar el sitio para indexación en Google Search Console y mejorar la relevancia de búsqueda más allá del nombre genérico "Zenith".
 
+## [2026-07-26 13:00 UTC]
+
+- Archivos modificados:
+  - api/chat.js
+
+- Cambios realizados:
+  - Nueva función `isAskingClarification(text)`: detecta cuando el agente responde con una pregunta de aclaración legítima (respuesta corta < 500 chars, sin código, sin TOOL:, termina en `?`). Esto distingue "el agente olvidó la herramienta" de "el agente inteligentemente pidió contexto".
+  - El enforcement de herramientas ahora tiene una salida explícita: si `isAskingClarification(text)` es `true`, la respuesta se transmite al usuario en lugar de inyectar el mensaje de reintento. El agente puede preguntar sin ser silenciado.
+  - `intentNote` en el system prompt reemplazado: ya no dice "Execute immediately" sin condiciones. Ahora incluye la regla "SMART AGENT RULE: si el objetivo es ambiguo, pregunta UNA vez antes de adivinar".
+  - Nueva regla `T15` en el system prompt: "CLARIFICATION OVER GUESSING — antes de ejecutar una herramienta sobre un objetivo ambiguo, pregunta UNA pregunta concisa. Después de que responda, procede con la herramienta inmediatamente."
+  - `TOOL_CALL_DIRECTIVE` actualizado: agrega una excepción explícita ("EXCEPTION — CLARIFY FIRST") que le indica al modelo que una pregunta de aclaración de una línea es válida cuando el objetivo es genuinamente ambiguo.
+
+- Motivo:
+  - El sistema de enforcement anterior era binario: o ejecuta una herramienta o falla. Esto impedía al agente hacer preguntas inteligentes como "veo varios scripts — ¿cuál tiene el error?". La consecuencia era que ejecutaba get_tree sobre toda la jerarquía o inventaba un objetivo, en lugar de pedir clarificación como haría un agente profesional (similar a usedrebirth.com). Los cambios agregan un tercer estado: CLARIFY, que es un comportamiento agente válido.
+
 ## [2026-07-26 12:30 UTC]
 
 - Archivos modificados:

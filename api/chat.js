@@ -110,7 +110,11 @@ function buildSystemPrompt(session, needsStudio) {
   if (!session) return base;
 
   const intentNote = needsStudio
-    ? '\n\n⚠️  INTENT DETECTED: The developer is asking for a Studio action. You MUST use a tool before responding. Do NOT describe the action, explain it, or write code first. Execute the tool immediately.'
+    ? '\n\n⚠️  STUDIO ACTION DETECTED: Use the appropriate tool to handle this request.\n' +
+      'SMART AGENT RULE: If the request is ambiguous — e.g. the developer says "my script" or "that button" but you ' +
+      'do not know which instance they mean — ask ONE short clarifying question instead of guessing or running ' +
+      'get_tree blindly. Example: "I can see multiple scripts — which one do you mean: ServerScript, LocalScript, or ModuleScript?" ' +
+      'After they answer, execute the tool immediately. When the target is clear, execute without asking.'
     : '';
 
   const studioContext = [
@@ -145,6 +149,10 @@ function buildSystemPrompt(session, needsStudio) {
       '"children" — nested children do NOT execute source and will be created EMPTY. Build the instance tree ' +
       'first (structure only, no scripts), THEN call create_script separately for each script\'s logic, using ' +
       'the exact path you just created.',
+    ' T15. CLARIFICATION OVER GUESSING: If the developer\'s request is ambiguous (e.g. "my script", "that button", ' +
+      '"the error" without specifying which one) and you would need to run get_tree/find_instances just to guess, ' +
+      'ask ONE concise clarifying question instead. Example: "I see several scripts in ServerScriptService — ' +
+      'which one has the bug? (name or path)" After they answer, proceed with the tool immediately without asking again.',
     '',
     'Available tools:',
     '  TOOL:{"name":"ping","args":{}}',
@@ -417,6 +425,19 @@ function extractToolCall(text) {
   }
 
   return parsed;
+}
+
+// ── Detect clarifying questions ────────────────────────────────────────────
+// When the agent is ambiguous about the target (many scripts, unnamed button,
+// etc.) it is smarter to ask than to guess. We detect this to avoid
+// triggering tool enforcement on a valid clarifying response.
+function isAskingClarification(text) {
+  if (!text || text.length > 500) return false; // Long responses are explanations, not questions
+  if (text.includes('TOOL:')) return false;       // Tool calls are not clarifying questions
+  if (text.includes('```')) return false;         // Code blocks are not questions
+  // Must end with a question mark (possibly followed by whitespace)
+  const trimmed = text.trim();
+  return trimmed.endsWith('?') || /\?\s*$/.test(trimmed);
 }
 
 // ── Diagnose WHY extractToolCall returned null ─────────────────────────────
@@ -743,10 +764,13 @@ function buildToolEnforcementMessage(userContent, failure) {
 
 const TOOL_CALL_DIRECTIVE =
   'DIRECTIVE — TOOL SELECTION MODE:\n' +
-  'Output ONLY the next TOOL:{...} JSON line needed to fulfil this request.\n' +
+  'Output the next TOOL:{...} JSON line needed to fulfil this request.\n' +
   'One optional "PLAN: ..." prefix line is allowed (one sentence, no code).\n' +
   'Do NOT write Lua code, explanations, or commentary of any kind.\n' +
-  'Do NOT call more than one tool — one TOOL:{...} per response, then stop.';
+  'Do NOT call more than one tool — one TOOL:{...} per response, then stop.\n' +
+  'EXCEPTION — CLARIFY FIRST: If the target is genuinely ambiguous (developer said "my script" or "the button" ' +
+  'without a specific name, and there could be many matches), output a single short question instead of a TOOL call. ' +
+  'Keep it to one sentence ending with a "?" — no code, no lists. After they answer, use the tool immediately.';
 
 // CONTINUE mode — a tool has run AND the original plan still has unfinished
 // steps. Leads with "keep executing", not "respond now", so the model
@@ -938,6 +962,21 @@ async function agentLoop(messages, apiKey, model, sessionId, res, needsStudio, t
 
     if (!toolCall) {
       const failure = describeToolCallFailure(text);
+
+      // ── Clarifying question: agent decided to ask instead of guessing ─────
+      // This is VALID intelligent behavior. If the AI responded with a short
+      // question (no tool, no code), stream it and let the user answer.
+      // Do NOT treat this as a failed tool call.
+      if (needsStudio && toolsExecuted === 0 && isAskingClarification(text)) {
+        if (!headerSent) {
+          writeSSE(res, { provider: 'OpenRouter', model: usedModel });
+          headerSent = true;
+        }
+        streamTextToClient(res, usedModel, text, { headerAlreadySent: true });
+        writeSSE(res, { done: true });
+        res.end();
+        return;
+      }
 
       // ── Tool enforcement: AI skipped a required tool, or botched the JSON ──
       // Only enforce on the first round, and only if intent detection says
