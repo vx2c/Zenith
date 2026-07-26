@@ -89,6 +89,8 @@ function buildSystemPrompt(
     "  T9. Before the first mutating call, output one line starting with \"PLAN:\" listing the steps.",
     " T10. Never delete or overwrite content unless the user explicitly asked for that exact change.",
     " T11. Never invent Roblox property values, paths, or class names you haven't read from TOOL_RESULT.",
+    " T12. After a WRITE tool succeeds: confirm in 1–2 sentences. NEVER show the Lua source code you wrote.",
+    " T13. After a READ tool succeeds: summarize findings. Show code only if the developer asked to see it.",
     "",
     "Available tools:",
     "  TOOL:{\"name\":\"ping\",\"args\":{}}",
@@ -190,6 +192,43 @@ function buildSystemPrompt(
   return base + intentNote + studioLines;
 }
 
+// ── Write tool classification ─────────────────────────────────────────────
+// After write tools succeed the AI must NOT reproduce the source code —
+// it creates a slow, cluttered response identical to hallucination.
+const WRITE_TOOLS = new Set([
+  "update_script", "create_script", "append_script", "create_module",
+  "format_script", "create_instance", "create_gui", "create_ui_element",
+  "update_ui_element", "create_part", "create_model", "create_spawn",
+  "create_remote_event", "create_remote_function", "create_folder",
+  "rename_instance", "move_instance", "clone_instance", "delete_instance",
+  "set_properties", "set_attributes", "save_place", "clear_output",
+]);
+
+// ── Per-round mode directives ─────────────────────────────────────────────
+// Appended to the system prompt each round so the model reads its current
+// phase instruction last — ensuring Tool Mode and Chat Mode stay separated.
+const TOOL_CALL_DIRECTIVE =
+  "\n\nDIRECTIVE — TOOL SELECTION MODE:\n" +
+  "Output ONLY the next TOOL:{...} JSON line needed to fulfil this request.\n" +
+  "One optional \"PLAN: ...\" prefix line is allowed (one sentence, no code).\n" +
+  "Do NOT write Lua code, explanations, or commentary of any kind.\n" +
+  "Do NOT call more than one tool — one TOOL:{...} per response, then stop.";
+
+const EXPLANATION_DIRECTIVE =
+  "\n\nDIRECTIVE — EXPLANATION MODE:\n" +
+  "You have received a TOOL_RESULT. Respond to the developer now.\n" +
+  "WRITE tools (update_script, create_script, append_script, create_instance, etc.):\n" +
+  "  • 1–2 sentences confirming what was done. Name the path or instance.\n" +
+  "  • Do NOT show Lua source code. Do NOT open a code block.\n" +
+  "  • Do NOT show raw JSON output.\n" +
+  "READ tools (read_script, get_tree, find_instances, get_properties, etc.):\n" +
+  "  • Summarize key findings briefly.\n" +
+  "  • Show code only if the developer explicitly asked to see it.\n" +
+  "ALL cases:\n" +
+  "  • If another tool is still needed, output TOOL:{...} instead of explaining.\n" +
+  "  • Never claim success beyond what the TOOL_RESULT confirms.\n" +
+  "  • Never reproduce the full TOOL_RESULT verbatim.";
+
 // ── Tool validation ───────────────────────────────────────────────────────
 function validateToolCall(name: string, args: Record<string, unknown>): string | null {
   if (!SUPPORTED_STUDIO_TOOLS.has(name)) return `Unsupported Studio tool "${name}".`;
@@ -213,6 +252,36 @@ function validateToolCall(name: string, args: Record<string, unknown>): string |
   if (typeof args["source"] === "string" && (args["source"] as string).length > 100_000) {
     return `Source for "${name}" is too large.`;
   }
+
+  // ── Tool-specific required fields ────────────────────────────────────────
+  if (name === "create_script") {
+    if (!args["path"] || typeof args["path"] !== "string" || !String(args["path"]).trim()) {
+      return '"create_script" requires a "path" in the form "ParentService.ScriptName".';
+    }
+    if (!String(args["path"]).includes(".")) {
+      return (
+        '"create_script" path must include the parent service: use "ParentService.ScriptName", ' +
+        'not just "ScriptName". If unsure, call get_tree first to verify the parent exists.'
+      );
+    }
+    const VALID_TYPES = new Set(["Script", "LocalScript", "ModuleScript"]);
+    if (!args["type"] || !VALID_TYPES.has(args["type"] as string)) {
+      return '"create_script" requires "type" to be one of: Script, LocalScript, ModuleScript.';
+    }
+  }
+
+  if (name === "create_instance" || name === "create_ui_element") {
+    if (!args["className"] || typeof args["className"] !== "string" || !String(args["className"]).trim()) {
+      return `"${name}" requires a non-empty "className" (e.g. "ScreenGui", "TextLabel", "Part").`;
+    }
+    if (!args["name"] || typeof args["name"] !== "string" || !String(args["name"]).trim()) {
+      return `"${name}" requires a non-empty "name" for the new instance.`;
+    }
+    if (!args["parent"] || typeof args["parent"] !== "string" || !String(args["parent"]).trim()) {
+      return `"${name}" requires a non-empty "parent" path where the instance will be created.`;
+    }
+  }
+
   return null;
 }
 
@@ -345,28 +414,41 @@ function toolLabel(name: string): string {
 }
 
 // ── TOOL_RESULT injection message ─────────────────────────────────────────
+// Write-tool-aware: write tools get a strict no-code rule; read tools get
+// a summarize rule that allows referencing content.
 function buildToolResultMessage(toolName: string, toolResult: unknown, isError: boolean): string {
   const resultJson = JSON.stringify(toolResult, null, 2);
   if (isError) {
     return (
       `TOOL_RESULT [${toolName}] — FAILED\n${resultJson}\n\n` +
-      `The tool did NOT succeed. You MUST NOT claim the action was completed.\n` +
-      `Options:\n` +
-      `  1. Explain the error to the developer clearly.\n` +
-      `  2. If recoverable, use a different tool (e.g. get_tree to find the correct path).\n` +
-      `  3. Never fabricate a success message after a failure.\n` +
-      `Respond now based on this failure result.`
+      `RESPONSE RULES:\n` +
+      `  - Explain the error in plain language (1–2 sentences).\n` +
+      `  - Do NOT show Lua code or JSON data.\n` +
+      `  - If recoverable (wrong path, etc.), output a TOOL:{...} fix immediately.\n` +
+      `  - Never claim the action succeeded.`
     );
   }
+  if (WRITE_TOOLS.has(toolName)) {
+    return (
+      `TOOL_RESULT [${toolName}] — SUCCESS\n${resultJson}\n\n` +
+      `RESPONSE RULES (WRITE OPERATION — STRICT):\n` +
+      `  - Confirm what was done in 1–2 sentences. Name the specific instance or path.\n` +
+      `  - Do NOT reproduce or display any Lua source code — not even a snippet.\n` +
+      `  - Do NOT show raw JSON data from the result.\n` +
+      `  - Do NOT open a code block. Do NOT say "Here is the code:" or similar.\n` +
+      `  - If another tool is still needed, output TOOL:{...} now instead of explaining.\n` +
+      `  - Base your answer ONLY on this TOOL_RESULT. Do not invent details.`
+    );
+  }
+  // Read / inspect tools
   return (
     `TOOL_RESULT [${toolName}] — SUCCESS\n${resultJson}\n\n` +
-    `The tool executed successfully. The above data is the authoritative result from Roblox Studio.\n` +
-    `Rules:\n` +
-    `  - Base your response ONLY on this result, not on assumptions.\n` +
-    `  - If more tools are needed to complete the task, output the next TOOL:{...} call now.\n` +
-    `  - If the task is complete, summarize what was done based on this result. Be specific.\n` +
-    `  - Do NOT say "Done" or "Listo" without referencing what the result shows.\n` +
-    `Respond now.`
+    `RESPONSE RULES (READ OPERATION):\n` +
+    `  - Summarize the key findings concisely.\n` +
+    `  - Show code only if the developer explicitly asked to see the source.\n` +
+    `  - Do NOT reproduce the full output verbatim.\n` +
+    `  - If another tool is needed to complete the task, output TOOL:{...} now.\n` +
+    `  - Base your answer ONLY on this TOOL_RESULT.`
   );
 }
 
@@ -397,13 +479,17 @@ async function runAgent(
   let conversation = messages;
   let headerSent = false;
   let toolEnforcementRetries = 0;
+  let toolsExecuted = 0; // tracks real tool executions this turn
 
   for (let round = 0; round < MAX_ROUNDS; round++) {
+    // Append the per-phase directive to the system prompt so the model
+    // always reads its current-phase instruction last.
+    const roundDirective = toolsExecuted === 0 ? TOOL_CALL_DIRECTIVE : EXPLANATION_DIRECTIVE;
     const result = await collectCompletion(
       conversation,
       model ?? DEFAULT_MODEL,
       null,
-      systemPrompt,
+      systemPrompt + roundDirective,
     );
 
     if ("error" in result) {
@@ -418,7 +504,9 @@ async function runAgent(
 
     if (!toolCall) {
       // ── Tool enforcement: AI skipped a required tool ──────────────────
-      if (needsStudio && round < MAX_ROUNDS - 1 && toolEnforcementRetries < MAX_TOOL_ENFORCEMENT_RETRIES) {
+      // Only fire before any tool has run. Once a tool executed, the AI
+      // is trusted to explain or call the next tool naturally.
+      if (needsStudio && toolsExecuted === 0 && round < MAX_ROUNDS - 1 && toolEnforcementRetries < MAX_TOOL_ENFORCEMENT_RETRIES) {
         toolEnforcementRetries++;
         const lastUserMsg = [...conversation].reverse().find(
           m => m.role === "user" &&
@@ -473,6 +561,7 @@ async function runAgent(
     const isError = toolResult !== null &&
       typeof toolResult === "object" &&
       "error" in (toolResult as object);
+    toolsExecuted++;
 
     // Timeline: tool done or error
     sendSse(res, {
