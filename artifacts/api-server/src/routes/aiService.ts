@@ -13,12 +13,15 @@ const SITE_NAME       = "Zenith - Roblox Studio AI";
 
 // ── Model registry ───────────────────────────
 
-// Prefer the models Zenith has historically used successfully. OpenRouter's
-// free pool changes providers frequently, so openrouter/free is kept last as
-// a dynamic fallback instead of hard-coding more unstable model IDs.
+// Fallback chain ordered by reliability and capability for Roblox Studio tasks.
+// Free-tier models rotate availability — multiple backups prevent empty responses.
 export const FALLBACK_CHAIN = [
-  "openai/gpt-oss-20b:free",
-  "openrouter/free", // silent fallback when gpt-oss-20b is unavailable
+  "deepseek/deepseek-chat:free",          // #1: strongest free model for code + multi-step reasoning
+  "google/gemma-3-27b-it:free",           // #2: solid instruction-following
+  "meta-llama/llama-3.3-70b-instruct:free", // #3: large llama, reliable
+  "qwen/qwen3-8b:free",                   // #4: fast fallback
+  "openai/gpt-oss-20b:free",              // #5: gpt backup
+  "meta-llama/llama-3.1-8b-instruct:free", // #6: small llama final fallback
 ] as const;
 
 export type ModelId = (typeof FALLBACK_CHAIN)[number] | (string & {});

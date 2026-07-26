@@ -214,20 +214,27 @@ const TOOL_CALL_DIRECTIVE =
   "Do NOT write Lua code, explanations, or commentary of any kind.\n" +
   "Do NOT call more than one tool — one TOOL:{...} per response, then stop.";
 
+// CRITICAL FIX: "EXPLANATION MODE" caused Zenith to stop mid-task after 1-3 tools
+// because "Respond now" strongly signals the model to produce a final answer.
+// Replaced with a "Continue or Finish" directive that keeps multi-step tasks alive.
 const EXPLANATION_DIRECTIVE =
-  "\n\nDIRECTIVE — EXPLANATION MODE:\n" +
-  "You have received a TOOL_RESULT. Respond to the developer now.\n" +
-  "WRITE tools (update_script, create_script, append_script, create_instance, etc.):\n" +
-  "  • 1–2 sentences confirming what was done. Name the path or instance.\n" +
-  "  • Do NOT show Lua source code. Do NOT open a code block.\n" +
-  "  • Do NOT show raw JSON output.\n" +
-  "READ tools (read_script, get_tree, find_instances, get_properties, etc.):\n" +
-  "  • Summarize key findings briefly.\n" +
-  "  • Show code only if the developer explicitly asked to see it.\n" +
-  "ALL cases:\n" +
-  "  • If another tool is still needed, output TOOL:{...} instead of explaining.\n" +
-  "  • Never claim success beyond what the TOOL_RESULT confirms.\n" +
-  "  • Never reproduce the full TOOL_RESULT verbatim.";
+  "\n\nDIRECTIVE — CONTINUE OR COMPLETE:\n" +
+  "A tool just finished. Review the TOOL_RESULT in the conversation and DECIDE:\n" +
+  "\n" +
+  "  ▶ MORE STEPS NEEDED → output the next TOOL:{...} immediately. Do NOT explain yet.\n" +
+  "    Use this when the original task still has unfinished steps.\n" +
+  "    Examples: verify a write, read before editing, search before creating, etc.\n" +
+  "\n" +
+  "  ✅ TASK FULLY COMPLETE → write a short summary (1–3 sentences) of what was done.\n" +
+  "    Use this ONLY when EVERY step of the original request is finished.\n" +
+  "\n" +
+  "Rules for the COMPLETE path:\n" +
+  "  • WRITE tools: confirm action and path. No Lua code. No code blocks.\n" +
+  "  • READ tools: summarize key findings. Show code only if developer explicitly asked.\n" +
+  "  • Never reproduce raw TOOL_RESULT JSON verbatim.\n" +
+  "  • Never claim success beyond what TOOL_RESULT confirms.\n" +
+  "\n" +
+  "Default to MORE STEPS when in doubt — completing extra checks is always better than stopping early.";
 
 // ── Tool validation ───────────────────────────────────────────────────────
 function validateToolCall(name: string, args: Record<string, unknown>): string | null {
