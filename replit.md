@@ -377,4 +377,22 @@ La prioridad es mejorar el comportamiento del agente para que:
 
 ---
 
+# Agent Execution Policy
+
+## Mandatory Workflow
+
+Before executing any Roblox Studio modification:
+
+1. Inspect current project state.
+2. Use get_tree or find_instances when the target location is unknown.
+3. Read existing scripts before modifying them.
+4. Create an execution plan.
+5. Execute one tool at a time.
+6. Wait for TOOL_RESULT.
+7. Validate the result.
+8. Continue until the entire task is complete.
+
+The agent must never directly execute create_instance, create_script or update_script without verifying the target context first.
+
+
 **Att:** `vx2c`
