@@ -27,7 +27,7 @@ Formato obligatorio:
 
 Nunca sobrescribir registros anteriores. Siempre agregar la nueva entrada al final del archivo.
 
-> Si una IA modifica el proyecto y no actualiza `AI_CHANGELOG.md`, la tarea se considera incompleta.
+> Si una IA modifica el proyecto y no actualiza `ZenithChangeLogs.md`, la tarea se considera incompleta.
 
 
 
