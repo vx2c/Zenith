@@ -16,6 +16,7 @@ interface TimelineEntry {
   status: 'plan' | 'running' | 'done' | 'error';
   tool?: string;
   error?: string;
+  detail?: string;
 }
 
 interface Message {
@@ -505,73 +506,132 @@ function AFKScreen({ userName, onDismiss, isDark, lang }: { userName: string; on
   );
 }
 
-// ── Agent Timeline ────────────────────────────
+// ── Tool emoji map ────────────────────────────
+const TOOL_EMOJI: Record<string, string> = {
+  ping:                     '📡',
+  get_tree:                 '🌳',
+  find_instances:           '🔍',
+  get_selection:            '🎯',
+  search_scripts:           '🔍',
+  read_script:              '📄',
+  create_script:            '✏️',
+  update_script:            '✏️',
+  append_script:            '✏️',
+  create_module:            '📦',
+  format_script:            '✨',
+  get_properties:           '🔧',
+  get_attributes:           '🏷️',
+  set_properties:           '🔧',
+  set_attributes:           '🏷️',
+  create_instance:          '📦',
+  create_gui:               '🖼️',
+  create_ui_element:        '🖼️',
+  update_ui_element:        '🖼️',
+  create_part:              '🧊',
+  create_model:             '🎭',
+  create_spawn:             '🚀',
+  create_remote_event:      '📡',
+  create_remote_function:   '📡',
+  create_folder:            '📁',
+  rename_instance:          '✏️',
+  move_instance:            '📁',
+  clone_instance:           '📋',
+  delete_instance:          '🗑️',
+  get_output_logs:          '📋',
+  clear_output:             '🧹',
+  save_place:               '💾',
+  analyze_project:          '🔬',
+  summarize_project:        '📊',
+  detect_systems:           '⚙️',
+  request_script_injection: '💉',
+};
+
+// ── Agent Timeline — mini command cards ────────
 function AgentTimeline({ entries, isDark }: { entries: TimelineEntry[]; isDark: boolean }) {
   const th = mkTheme(isDark);
 
-  const statusIcon = (status: TimelineEntry['status'], tool?: string) => {
-    const isRead = tool && ['get_tree','read_script','find_instances','get_selection','search_scripts','get_properties','get_attributes','get_output_logs','detect_systems','summarize_project','analyze_project'].includes(tool);
+  function cardColors(status: TimelineEntry['status']) {
+    if (isDark) {
+      if (status === 'running') return { bg: 'rgba(37,99,235,0.14)', border: 'rgba(96,165,250,0.35)' };
+      if (status === 'done')    return { bg: 'rgba(22,163,74,0.12)',  border: 'rgba(74,222,128,0.3)'  };
+      if (status === 'error')   return { bg: 'rgba(220,38,38,0.14)',  border: 'rgba(248,113,113,0.35)'};
+      return { bg: 'rgba(255,255,255,0.04)', border: 'rgba(255,255,255,0.1)' };
+    } else {
+      if (status === 'running') return { bg: 'rgba(37,99,235,0.06)',  border: 'rgba(37,99,235,0.2)'  };
+      if (status === 'done')    return { bg: 'rgba(22,163,74,0.06)',   border: 'rgba(22,163,74,0.22)' };
+      if (status === 'error')   return { bg: 'rgba(220,38,38,0.06)',   border: 'rgba(220,38,38,0.2)'  };
+      return { bg: 'rgba(0,0,0,0.03)', border: 'rgba(0,0,0,0.1)' };
+    }
+  }
+
+  function StatusBadge({ status, error }: { status: TimelineEntry['status']; error?: string }) {
     if (status === 'running') return (
-      <span style={{ display:'inline-block', width:14, height:14, border:`2px solid ${isDark ? '#60a5fa' : '#3b82f6'}`, borderTopColor:'transparent', borderRadius:'50%', animation:'spin 0.7s linear infinite', flexShrink:0 }} />
+      <span style={{ display:'inline-flex', alignItems:'center', gap:4,
+        color: isDark ? '#60a5fa' : '#2563eb', fontSize:'0.67rem', fontWeight:700 }}>
+        <span style={{ display:'inline-block', width:7, height:7,
+          border:`1.5px solid ${isDark ? '#60a5fa' : '#2563eb'}`,
+          borderTopColor:'transparent', borderRadius:'50%',
+          animation:'spin 0.7s linear infinite', flexShrink:0 }} />
+        Running…
+      </span>
     );
     if (status === 'done') return (
-      <span style={{ display:'inline-flex', alignItems:'center', justifyContent:'center', width:14, height:14, borderRadius:'50%', background: isRead ? (isDark ? '#1e3a5f' : '#dbeafe') : (isDark ? '#14532d' : '#dcfce7'), flexShrink:0 }}>
-        {isRead
-          ? <svg width="8" height="8" viewBox="0 0 8 8" fill="none"><circle cx="4" cy="4" r="3" stroke={isDark ? '#60a5fa' : '#3b82f6'} strokeWidth="1.5"/></svg>
-          : <svg width="8" height="6" viewBox="0 0 8 6" fill="none"><path d="M1 3l2 2 4-4" stroke={isDark ? '#4ade80' : '#16a34a'} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
-        }
+      <span style={{ display:'inline-flex', alignItems:'center', gap:3,
+        color: isDark ? '#4ade80' : '#16a34a', fontSize:'0.67rem', fontWeight:700 }}>
+        ✅ Completed
       </span>
     );
     if (status === 'error') return (
-      <span style={{ display:'inline-flex', alignItems:'center', justifyContent:'center', width:14, height:14, borderRadius:'50%', background: isDark ? '#4c1d1d' : '#fee2e2', flexShrink:0 }}>
-        <svg width="8" height="8" viewBox="0 0 8 8" fill="none"><path d="M2 2l4 4M6 2L2 6" stroke={isDark ? '#f87171' : '#dc2626'} strokeWidth="1.5" strokeLinecap="round"/></svg>
+      <span style={{ display:'inline-flex', alignItems:'center', gap:3,
+        color: isDark ? '#f87171' : '#dc2626', fontSize:'0.67rem', fontWeight:700,
+        maxWidth:130, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
+        ❌ {error ? error.slice(0, 30) : 'Failed'}
       </span>
     );
-    // plan
     return (
-      <span style={{ display:'inline-flex', alignItems:'center', justifyContent:'center', width:14, height:14, flexShrink:0 }}>
-        <svg width="10" height="10" viewBox="0 0 10 10" fill="none"><rect x="1" y="1" width="8" height="8" rx="2" stroke={th.textSub} strokeWidth="1.5"/><path d="M3 5h4M3 3h4M3 7h2" stroke={th.textSub} strokeWidth="1" strokeLinecap="round"/></svg>
+      <span style={{ display:'inline-flex', alignItems:'center', gap:3,
+        color: th.textSub, fontSize:'0.67rem', fontWeight:600 }}>
+        📋 Plan
       </span>
     );
-  };
-
-  const stepColor = (status: TimelineEntry['status']) => {
-    if (status === 'running') return isDark ? '#93c5fd' : '#2563eb';
-    if (status === 'done')    return isDark ? '#86efac' : '#15803d';
-    if (status === 'error')   return isDark ? '#f87171' : '#dc2626';
-    return th.textSub;
-  };
+  }
 
   return (
-    <div style={{
-      margin: '0 0 10px 0',
-      padding: '10px 14px',
-      background: isDark ? 'rgba(255,255,255,0.03)' : 'rgba(0,0,0,0.03)',
-      border: `1px solid ${isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.06)'}`,
-      borderRadius: 12,
-      display: 'flex',
-      flexDirection: 'column',
-      gap: 6,
-    }}>
-      {entries.map((entry, i) => (
-        <div key={`${entry.id}-${i}`} style={{ display:'flex', alignItems:'center', gap:8 }}>
-          {statusIcon(entry.status, entry.tool)}
-          <span style={{
-            fontSize: '0.75rem',
-            fontWeight: 500,
-            color: stepColor(entry.status),
-            fontFamily: "'Inter', sans-serif",
-            flex: 1,
-            minWidth: 0,
-            overflow: 'hidden',
-            textOverflow: 'ellipsis',
-            whiteSpace: 'nowrap',
+    <div style={{ display:'flex', flexWrap:'wrap', gap:8, marginBottom:10 }}>
+      {entries.map((entry, i) => {
+        const emoji = TOOL_EMOJI[entry.tool ?? ''] ?? '⚙️';
+        const { bg, border } = cardColors(entry.status);
+        return (
+          <div key={`${entry.id}-${i}`} style={{
+            display:'flex', alignItems:'flex-start', gap:8,
+            padding:'8px 12px', borderRadius:12,
+            background: bg, border:`1px solid ${border}`,
+            minWidth:120, maxWidth:210,
+            transition:'all 0.2s ease',
+            boxShadow: isDark ? 'none' : '0 1px 3px rgba(0,0,0,0.06)',
           }}>
-            {entry.label}
-            {entry.status === 'error' && entry.error ? ` — ${entry.error}` : ''}
-          </span>
-        </div>
-      ))}
+            <span style={{ fontSize:'1rem', lineHeight:1, flexShrink:0, marginTop:2 }}>{emoji}</span>
+            <div style={{ display:'flex', flexDirection:'column', gap:3, minWidth:0 }}>
+              <span style={{
+                fontSize:'0.72rem', fontWeight:700, color:th.text,
+                whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis',
+              }}>
+                {entry.label}
+              </span>
+              {entry.detail && (
+                <span style={{
+                  fontSize:'0.68rem', color:th.textSub,
+                  whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis',
+                  fontFamily:"'JetBrains Mono','Fira Mono',monospace",
+                }}>
+                  {entry.detail}
+                </span>
+              )}
+              <StatusBadge status={entry.status} error={entry.error} />
+            </div>
+          </div>
+        );
+      })}
     </div>
   );
 }

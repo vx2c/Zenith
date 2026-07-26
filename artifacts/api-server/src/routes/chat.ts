@@ -377,6 +377,54 @@ function sendSse(res: Response, payload: Record<string, unknown>): void {
   res.write(`data: ${JSON.stringify(payload)}\n\n`);
 }
 
+// ── Timeline detail extractor ─────────────────────────────────────────────
+// Extracts a short human-readable subtitle for the command card (e.g. the
+// script name or search query) from the tool's arguments.
+function toolDetail(name: string, args: Record<string, unknown>): string | undefined {
+  const path   = typeof args["path"]   === "string" ? args["path"]   : undefined;
+  const parent = typeof args["parent"] === "string" ? args["parent"] : undefined;
+  const iName  = typeof args["name"]   === "string" ? args["name"]   : undefined;
+  const query  = typeof args["query"]  === "string" ? args["query"]  : undefined;
+  const lastName = (p?: string) => p?.split(".").pop();
+
+  switch (name) {
+    case "read_script":
+    case "update_script":
+    case "append_script":
+    case "format_script":
+    case "get_properties":
+    case "get_attributes":
+    case "set_properties":
+    case "set_attributes":
+    case "rename_instance":
+    case "move_instance":
+    case "clone_instance":
+    case "delete_instance":
+      return lastName(path);
+    case "create_script":
+    case "create_module":
+      return lastName(path);
+    case "create_instance":
+    case "create_gui":
+    case "create_ui_element":
+    case "update_ui_element":
+    case "create_part":
+    case "create_model":
+    case "create_spawn":
+    case "create_remote_event":
+    case "create_remote_function":
+    case "create_folder":
+      return iName ?? lastName(parent);
+    case "get_tree":
+      return path ? lastName(path) : "Explorer";
+    case "find_instances":
+    case "search_scripts":
+      return query ? `"${query}"` : undefined;
+    default:
+      return undefined;
+  }
+}
+
 // ── Timeline label map ────────────────────────────────────────────────────
 const TOOL_LABELS: Record<string, string> = {
   ping:                   "Checking Studio connection",
@@ -561,8 +609,9 @@ async function runAgent(
     }
 
     // Timeline: tool running
-    const label = toolLabel(toolCall.name);
-    sendSse(res, { timeline: { id: round, label, status: "running", tool: toolCall.name } });
+    const label  = toolLabel(toolCall.name);
+    const detail = toolDetail(toolCall.name, toolCall.args);
+    sendSse(res, { timeline: { id: round, label, status: "running", tool: toolCall.name, ...(detail ? { detail } : {}) } });
 
     const toolResult = await executeStudioTool(sessionId, toolCall.name, toolCall.args);
     const isError = toolResult !== null &&
@@ -577,6 +626,7 @@ async function runAgent(
         label,
         status: isError ? "error" : "done",
         tool: toolCall.name,
+        ...(detail ? { detail } : {}),
         ...(isError ? { error: (toolResult as { error: string }).error } : {}),
       },
     });
