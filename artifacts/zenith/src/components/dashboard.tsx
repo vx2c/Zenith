@@ -10,6 +10,14 @@ interface DashboardProps {
   userName: string;
 }
 
+interface TimelineEntry {
+  id: number;
+  label: string;
+  status: 'plan' | 'running' | 'done' | 'error';
+  tool?: string;
+  error?: string;
+}
+
 interface Message {
   role: 'user' | 'ai';
   content: string;
@@ -22,6 +30,8 @@ interface Message {
   chipKind?: 'text' | 'lua';
   chipLines?: number;
   chipRaw?: string;
+  // Timeline entries for agentic tool calls
+  timeline?: TimelineEntry[];
 }
 
 interface AIStatusData {
@@ -170,6 +180,21 @@ function useChat(sessionId?: string | null) {
     return () => clearInterval(interval);
   }, [loading]);
 
+  function updateTimeline(entry: TimelineEntry) {
+    setMessages(prev => {
+      const updated = [...prev];
+      const last = updated[updated.length - 1];
+      if (!last || last.role !== 'ai') return prev;
+      const existing = last.timeline ?? [];
+      const idx = existing.findIndex(e => e.id === entry.id);
+      const newTimeline = idx >= 0
+        ? existing.map((e, i) => i === idx ? { ...e, ...entry } : e)
+        : [...existing, entry];
+      updated[updated.length - 1] = { ...last, timeline: newTimeline };
+      return updated;
+    });
+  }
+
   async function send(text: string, rawContent?: string) {
     if (!text.trim() || loading) return;
     abortRef.current = new AbortController();
@@ -230,6 +255,9 @@ function useChat(sessionId?: string | null) {
             if (parsed.model) { setActiveModel(parsed.model); finalModel = parsed.model; }
             if (parsed.done) continue;
             if (parsed.error) throw new Error(parsed.error);
+            if (parsed.timeline) {
+              updateTimeline(parsed.timeline as TimelineEntry);
+            }
             if (parsed.content) {
               setMessages((prev) => {
                 const updated = [...prev];
@@ -473,6 +501,77 @@ function AFKScreen({ userName, onDismiss, isDark, lang }: { userName: string; on
           {T.afkButton}
         </button>
       </div>
+    </div>
+  );
+}
+
+// ── Agent Timeline ────────────────────────────
+function AgentTimeline({ entries, isDark }: { entries: TimelineEntry[]; isDark: boolean }) {
+  const th = mkTheme(isDark);
+
+  const statusIcon = (status: TimelineEntry['status'], tool?: string) => {
+    const isRead = tool && ['get_tree','read_script','find_instances','get_selection','search_scripts','get_properties','get_attributes','get_output_logs','detect_systems','summarize_project','analyze_project'].includes(tool);
+    if (status === 'running') return (
+      <span style={{ display:'inline-block', width:14, height:14, border:`2px solid ${isDark ? '#60a5fa' : '#3b82f6'}`, borderTopColor:'transparent', borderRadius:'50%', animation:'spin 0.7s linear infinite', flexShrink:0 }} />
+    );
+    if (status === 'done') return (
+      <span style={{ display:'inline-flex', alignItems:'center', justifyContent:'center', width:14, height:14, borderRadius:'50%', background: isRead ? (isDark ? '#1e3a5f' : '#dbeafe') : (isDark ? '#14532d' : '#dcfce7'), flexShrink:0 }}>
+        {isRead
+          ? <svg width="8" height="8" viewBox="0 0 8 8" fill="none"><circle cx="4" cy="4" r="3" stroke={isDark ? '#60a5fa' : '#3b82f6'} strokeWidth="1.5"/></svg>
+          : <svg width="8" height="6" viewBox="0 0 8 6" fill="none"><path d="M1 3l2 2 4-4" stroke={isDark ? '#4ade80' : '#16a34a'} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
+        }
+      </span>
+    );
+    if (status === 'error') return (
+      <span style={{ display:'inline-flex', alignItems:'center', justifyContent:'center', width:14, height:14, borderRadius:'50%', background: isDark ? '#4c1d1d' : '#fee2e2', flexShrink:0 }}>
+        <svg width="8" height="8" viewBox="0 0 8 8" fill="none"><path d="M2 2l4 4M6 2L2 6" stroke={isDark ? '#f87171' : '#dc2626'} strokeWidth="1.5" strokeLinecap="round"/></svg>
+      </span>
+    );
+    // plan
+    return (
+      <span style={{ display:'inline-flex', alignItems:'center', justifyContent:'center', width:14, height:14, flexShrink:0 }}>
+        <svg width="10" height="10" viewBox="0 0 10 10" fill="none"><rect x="1" y="1" width="8" height="8" rx="2" stroke={th.textSub} strokeWidth="1.5"/><path d="M3 5h4M3 3h4M3 7h2" stroke={th.textSub} strokeWidth="1" strokeLinecap="round"/></svg>
+      </span>
+    );
+  };
+
+  const stepColor = (status: TimelineEntry['status']) => {
+    if (status === 'running') return isDark ? '#93c5fd' : '#2563eb';
+    if (status === 'done')    return isDark ? '#86efac' : '#15803d';
+    if (status === 'error')   return isDark ? '#f87171' : '#dc2626';
+    return th.textSub;
+  };
+
+  return (
+    <div style={{
+      margin: '0 0 10px 0',
+      padding: '10px 14px',
+      background: isDark ? 'rgba(255,255,255,0.03)' : 'rgba(0,0,0,0.03)',
+      border: `1px solid ${isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.06)'}`,
+      borderRadius: 12,
+      display: 'flex',
+      flexDirection: 'column',
+      gap: 6,
+    }}>
+      {entries.map((entry, i) => (
+        <div key={`${entry.id}-${i}`} style={{ display:'flex', alignItems:'center', gap:8 }}>
+          {statusIcon(entry.status, entry.tool)}
+          <span style={{
+            fontSize: '0.75rem',
+            fontWeight: 500,
+            color: stepColor(entry.status),
+            fontFamily: "'Inter', sans-serif",
+            flex: 1,
+            minWidth: 0,
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            whiteSpace: 'nowrap',
+          }}>
+            {entry.label}
+            {entry.status === 'error' && entry.error ? ` — ${entry.error}` : ''}
+          </span>
+        </div>
+      ))}
     </div>
   );
 }
@@ -825,6 +924,11 @@ function AssistantPanel({ isDark, lang, pluginSession }: { isDark: boolean; lang
                   <Zap size={16} color={isDark ? '#111' : '#fff'} strokeWidth={2} />
                 </div>
                 <div style={{ flex: 1 }}>
+                  {/* Timeline entries — shown above the text bubble */}
+                  {msg.timeline && msg.timeline.length > 0 && (
+                    <AgentTimeline entries={msg.timeline} isDark={isDark} />
+                  )}
+
                   <div style={{ maxWidth: '90%', padding: '0.875rem 1.125rem',
                     borderRadius: '20px 20px 20px 6px', background: th.aiMsg, color: th.aiMsgText,
                     fontSize: '1rem', lineHeight: 1.65, whiteSpace: 'pre-wrap', wordBreak: 'break-word',

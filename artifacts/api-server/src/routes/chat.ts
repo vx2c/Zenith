@@ -301,6 +301,49 @@ function sendSse(res: Response, payload: Record<string, unknown>): void {
   res.write(`data: ${JSON.stringify(payload)}\n\n`);
 }
 
+// ── Timeline label map ────────────────────────────────────────────────────
+const TOOL_LABELS: Record<string, string> = {
+  ping:                   "Checking Studio connection",
+  get_tree:               "Reading Explorer tree",
+  find_instances:         "Searching instances",
+  get_selection:          "Getting selection",
+  search_scripts:         "Searching scripts",
+  read_script:            "Reading script",
+  create_script:          "Creating script",
+  update_script:          "Updating script",
+  append_script:          "Appending to script",
+  create_module:          "Creating module",
+  format_script:          "Formatting script",
+  get_properties:         "Reading properties",
+  get_attributes:         "Reading attributes",
+  set_properties:         "Setting properties",
+  set_attributes:         "Setting attributes",
+  create_instance:        "Creating instance",
+  create_gui:             "Creating GUI",
+  create_ui_element:      "Creating UI element",
+  update_ui_element:      "Updating UI element",
+  create_part:            "Creating part",
+  create_model:           "Creating model",
+  create_spawn:           "Creating spawn",
+  create_remote_event:    "Creating RemoteEvent",
+  create_remote_function: "Creating RemoteFunction",
+  create_folder:          "Creating folder",
+  rename_instance:        "Renaming instance",
+  move_instance:          "Moving instance",
+  clone_instance:         "Cloning instance",
+  delete_instance:        "Deleting instance",
+  get_output_logs:        "Reading output logs",
+  clear_output:           "Clearing output",
+  save_place:             "Saving place",
+  analyze_project:        "Analyzing project",
+  summarize_project:      "Summarizing project",
+  detect_systems:         "Detecting systems",
+};
+
+function toolLabel(name: string): string {
+  return TOOL_LABELS[name] ?? `Running ${name}`;
+}
+
 // ── TOOL_RESULT injection message ─────────────────────────────────────────
 function buildToolResultMessage(toolName: string, toolResult: unknown, isError: boolean): string {
   const resultJson = JSON.stringify(toolResult, null, 2);
@@ -413,22 +456,34 @@ async function runAgent(
       sendSse(res, { provider: "OpenRouter", model: usedModel });
       headerSent = true;
     }
+
+    // Stream any PLAN: or reasoning text before the tool call
     if (textBeforeTool) {
-      sendSse(res, { content: `${textBeforeTool}\n` });
+      const planMatch = textBeforeTool.match(/^PLAN:\s*.+/m);
+      if (planMatch) {
+        sendSse(res, { timeline: { id: round, label: planMatch[0].replace(/^PLAN:\s*/, ""), status: "plan" } });
+      }
     }
 
-    sendSse(res, { content: `\n⚙️ *Ejecutando \`${toolCall.name}\`...*\n` });
+    // Timeline: tool running
+    const label = toolLabel(toolCall.name);
+    sendSse(res, { timeline: { id: round, label, status: "running", tool: toolCall.name } });
 
     const toolResult = await executeStudioTool(sessionId, toolCall.name, toolCall.args);
     const isError = toolResult !== null &&
       typeof toolResult === "object" &&
       "error" in (toolResult as object);
 
-    if (isError) {
-      sendSse(res, { content: `❌ *Error: ${(toolResult as { error: string }).error}*\n\n` });
-    } else {
-      sendSse(res, { content: "✅ *Resultado recibido de Studio.*\n\n" });
-    }
+    // Timeline: tool done or error
+    sendSse(res, {
+      timeline: {
+        id: round,
+        label,
+        status: isError ? "error" : "done",
+        tool: toolCall.name,
+        ...(isError ? { error: (toolResult as { error: string }).error } : {}),
+      },
+    });
 
     conversation = [
       ...conversation,
@@ -440,7 +495,7 @@ async function runAgent(
     ];
   }
 
-  sendSse(res, { error: "Demasiadas llamadas a herramientas en una respuesta. Por favor, intenta de nuevo." });
+  sendSse(res, { error: "Too many tool rounds. Please try again." });
   sendSse(res, { done: true });
   res.end();
 }
