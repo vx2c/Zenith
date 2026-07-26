@@ -7,7 +7,7 @@
 // ─────────────────────────────────────────────
 
 const OPENROUTER_BASE = 'https://openrouter.ai/api/v1/chat/completions';
-const SITE_URL        = process.env.SITE_URL || 'https://xzenith.vercel.app';
+const SITE_URL        = process.env.SITE_URL || 'https://www.xzenith.net';
 const SITE_NAME       = 'Zenith - Roblox Studio AI';
 
 // ── Model registry ───────────────────────────
