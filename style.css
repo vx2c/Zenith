@@ -1,5 +1,5 @@
 /* ══════════════════════════════════════════
-   ZENITH — Styles
+   XZENITH ROBLOX — Styles
    ══════════════════════════════════════════ */
 
 *, *::before, *::after { box-sizing: border-box; }
@@ -199,6 +199,12 @@ button { cursor: pointer; border: none; background: none; font: inherit; outline
   opacity: 0.9;
 }
 .z-label { font-size: 0.72rem; font-weight: 700; letter-spacing: 0.28em; color: #ededed; }
+.z-label-sub {
+  margin-left: 0.6em;
+  font-weight: 500;
+  color: rgba(255,255,255,0.4);
+}
+.z-label-sub::before { content: '·'; margin-right: 0.6em; color: rgba(255,255,255,0.25); }
 
 .landing-chat {
   width: min(560px, 92vw);
