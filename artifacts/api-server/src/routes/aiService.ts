@@ -17,10 +17,7 @@ const SITE_NAME       = "Zenith - Roblox Studio AI";
 // free pool changes providers frequently, so openrouter/free is kept last as
 // a dynamic fallback instead of hard-coding more unstable model IDs.
 export const FALLBACK_CHAIN = [
-  "google/gemma-4-26b-a4b-it:free",
-  "nvidia/nemotron-nano-9b-v2:free",
   "openai/gpt-oss-20b:free",
-  "openrouter/free",
 ] as const;
 
 export type ModelId = (typeof FALLBACK_CHAIN)[number] | (string & {});
