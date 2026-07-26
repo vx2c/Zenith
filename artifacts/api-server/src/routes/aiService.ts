@@ -13,15 +13,16 @@ const SITE_NAME       = "Zenith - Roblox Studio AI";
 
 // ── Model registry ───────────────────────────
 
-// Fallback chain ordered by reliability and capability for Roblox Studio tasks.
-// Free-tier models rotate availability — multiple backups prevent empty responses.
+// Fallback chain ordered by capability for Roblox Studio / Lua code tasks.
+// Verified against OpenRouter free-tier availability (July 2026).
 export const FALLBACK_CHAIN = [
-  "deepseek/deepseek-chat:free",          // #1: strongest free model for code + multi-step reasoning
-  "google/gemma-3-27b-it:free",           // #2: solid instruction-following
-  "meta-llama/llama-3.3-70b-instruct:free", // #3: large llama, reliable
-  "qwen/qwen3-8b:free",                   // #4: fast fallback
-  "openai/gpt-oss-20b:free",              // #5: gpt backup
-  "meta-llama/llama-3.1-8b-instruct:free", // #6: small llama final fallback
+  "nvidia/nemotron-3-ultra-550b-a55b:free", // #1: 550B params, strongest reasoning
+  "poolside/laguna-m.1:free",               // #2: code-specialized model
+  "google/gemma-4-31b-it:free",             // #3: Google Gemma 4, strong instruction-following
+  "cohere/north-mini-code:free",            // #4: code-focused, reliable
+  "nvidia/nemotron-3-super-120b-a12b:free", // #5: 120B fallback
+  "openrouter/free",                        // #6: dynamic OpenRouter fallback (picks best available)
+  "openai/gpt-oss-20b:free",               // #7: last resort
 ] as const;
 
 export type ModelId = (typeof FALLBACK_CHAIN)[number] | (string & {});
