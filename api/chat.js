@@ -678,7 +678,16 @@ const EXPLANATION_DIRECTIVE =
 
 function buildCallMessages(messages, toolsExecuted) {
   const directive = toolsExecuted === 0 ? TOOL_CALL_DIRECTIVE : EXPLANATION_DIRECTIVE;
-  return [...messages, { role: 'system', content: directive }];
+  // Merge the directive INTO the first system message content rather than
+  // appending a new system message at the end of the conversation.
+  // Most models (including gpt-oss-20b) only honour system messages at
+  // position 0 — a mid-conversation system message causes the model to
+  // produce truncated or empty responses ("stops writing").
+  return messages.map((m, i) =>
+    i === 0 && m.role === 'system'
+      ? { ...m, content: m.content + '\n\n' + directive }
+      : m
+  );
 }
 
 // ── Agentic loop: call AI → check for TOOL → execute → repeat ─────────────
