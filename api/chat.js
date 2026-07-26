@@ -690,6 +690,77 @@ function buildCallMessages(messages, toolsExecuted) {
   );
 }
 
+// ── Tool label map ─────────────────────────────────────────────────────────
+const TOOL_LABELS_MAP = {
+  ping:                   'Checking Studio connection',
+  get_tree:               'Reading Explorer tree',
+  find_instances:         'Searching instances',
+  get_selection:          'Getting selection',
+  search_scripts:         'Searching scripts',
+  read_script:            'Reading script',
+  create_script:          'Creating script',
+  update_script:          'Updating script',
+  append_script:          'Appending to script',
+  create_module:          'Creating module',
+  format_script:          'Formatting script',
+  get_properties:         'Reading properties',
+  get_attributes:         'Reading attributes',
+  set_properties:         'Setting properties',
+  set_attributes:         'Setting attributes',
+  create_instance:        'Creating instance',
+  create_gui:             'Creating GUI',
+  create_ui_element:      'Creating UI element',
+  update_ui_element:      'Updating UI element',
+  create_part:            'Creating part',
+  create_model:           'Creating model',
+  create_spawn:           'Creating spawn',
+  create_remote_event:    'Creating RemoteEvent',
+  create_remote_function: 'Creating RemoteFunction',
+  create_folder:          'Creating folder',
+  rename_instance:        'Renaming instance',
+  move_instance:          'Moving instance',
+  clone_instance:         'Cloning instance',
+  delete_instance:        'Deleting instance',
+  get_output_logs:        'Reading output logs',
+  clear_output:           'Clearing output',
+  save_place:             'Saving place',
+  analyze_project:        'Analyzing project',
+  summarize_project:      'Summarizing project',
+  detect_systems:         'Detecting systems',
+};
+
+function toolLabelFor(name) {
+  return TOOL_LABELS_MAP[name] ?? `Running ${name}`;
+}
+
+function toolDetailFor(name, args) {
+  const path   = typeof args.path   === 'string' ? args.path   : undefined;
+  const parent = typeof args.parent === 'string' ? args.parent : undefined;
+  const iName  = typeof args.name   === 'string' ? args.name   : undefined;
+  const query  = typeof args.query  === 'string' ? args.query  : undefined;
+  const last   = (p) => p?.split('.').pop();
+
+  switch (name) {
+    case 'read_script': case 'update_script': case 'append_script':
+    case 'format_script': case 'get_properties': case 'get_attributes':
+    case 'set_properties': case 'set_attributes': case 'rename_instance':
+    case 'move_instance': case 'clone_instance': case 'delete_instance':
+    case 'create_script': case 'create_module':
+      return last(path);
+    case 'create_instance': case 'create_gui': case 'create_ui_element':
+    case 'update_ui_element': case 'create_part': case 'create_model':
+    case 'create_spawn': case 'create_remote_event': case 'create_remote_function':
+    case 'create_folder':
+      return iName ?? last(parent);
+    case 'get_tree':
+      return path ? last(path) : 'Explorer';
+    case 'find_instances': case 'search_scripts':
+      return query ? `"${query}"` : undefined;
+    default:
+      return undefined;
+  }
+}
+
 // ── Agentic loop: call AI → check for TOOL → execute → repeat ─────────────
 async function agentLoop(messages, apiKey, model, sessionId, res, needsStudio) {
   const MAX_ROUNDS = 12;        // increased for complex multi-step workflows
@@ -764,22 +835,32 @@ async function agentLoop(messages, apiKey, model, sessionId, res, needsStudio) {
       writeSSE(res, { provider: 'OpenRouter', model: usedModel });
       headerSent = true;
     }
+
+    // PLAN: line → timeline plan card (not raw text)
     if (safePreText) {
-      writeSSE(res, { content: safePreText + '\n' });
+      const planText = safePreText.replace(/^PLAN:\s*/i, '');
+      writeSSE(res, { timeline: { id: round, label: planText, status: 'plan' } });
     }
 
-    writeSSE(res, { content: `\n⚙️ *Ejecutando \`${toolCall.name}\`...*\n` });
+    // Timeline: tool running (mini card)
+    const tlLabel  = toolLabelFor(toolCall.name);
+    const tlDetail = toolDetailFor(toolCall.name, toolCall.args || {});
+    writeSSE(res, { timeline: { id: round, label: tlLabel, status: 'running', tool: toolCall.name, ...(tlDetail ? { detail: tlDetail } : {}) } });
 
     // Execute the tool
     const toolResult = await executeStudioTool(sessionId, toolCall.name, toolCall.args || {});
     const isError = !!(toolResult && toolResult.error);
     toolsExecuted++;
 
-    if (isError) {
-      writeSSE(res, { content: `❌ *Error: ${toolResult.error}*\n\n` });
-    } else {
-      writeSSE(res, { content: `✅ *Resultado recibido de Studio.*\n\n` });
-    }
+    // Timeline: tool done or error (updates the card)
+    writeSSE(res, { timeline: {
+      id: round,
+      label: tlLabel,
+      status: isError ? 'error' : 'done',
+      tool: toolCall.name,
+      ...(tlDetail ? { detail: tlDetail } : {}),
+      ...(isError ? { error: toolResult.error } : {}),
+    } });
 
     // Inject the result back into the conversation with strong framing
     messages = [
