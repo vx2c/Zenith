@@ -16,8 +16,13 @@ const SITE_NAME       = 'Zenith - Roblox Studio AI';
 // the router fallback is intentionally last: it can select a currently
 // available free model without making the user choose a new model ID.
 const FALLBACK_CHAIN = [
-  'cohere/north-mini-code:free',
-  'openrouter/free', // silent fallback when gpt-oss-20b is unavailable
+=======
+  'nvidia/nemotron-3-super-120b-a12b:free',
+  'google/gemma-4-31b-it:free',
+  'openai/gpt-oss-20b:free',
+  'google/gemma-4-26b-a4b-it:free',
+  'nvidia/nemotron-nano-9b-v2:free',
+  'openrouter/free',
 ];
 
 const DEFAULT_MODEL = FALLBACK_CHAIN[0];
