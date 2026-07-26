@@ -1,0 +1,5 @@
+User-agent: *
+Allow: /
+Disallow: /roblox-callback
+
+Sitemap: https://www.xzenith.net/sitemap.xml
