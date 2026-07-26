@@ -17,6 +17,7 @@ const SITE_NAME       = 'Zenith - Roblox Studio AI';
 // available free model without making the user choose a new model ID.
 const FALLBACK_CHAIN = [
   'openai/gpt-oss-20b:free',
+  'openrouter/free', // silent fallback when gpt-oss-20b is unavailable
 ];
 
 const DEFAULT_MODEL = FALLBACK_CHAIN[0];

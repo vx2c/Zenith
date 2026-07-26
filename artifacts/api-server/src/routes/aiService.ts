@@ -18,6 +18,7 @@ const SITE_NAME       = "Zenith - Roblox Studio AI";
 // a dynamic fallback instead of hard-coding more unstable model IDs.
 export const FALLBACK_CHAIN = [
   "openai/gpt-oss-20b:free",
+  "openrouter/free", // silent fallback when gpt-oss-20b is unavailable
 ] as const;
 
 export type ModelId = (typeof FALLBACK_CHAIN)[number] | (string & {});
