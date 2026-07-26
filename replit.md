@@ -343,8 +343,7 @@ https://github.com/vx2c/Zenith
 
 Sitio web:
 
-https://xzenith.vercel.app
-
+https://www.xzenith.net
 Siempre respetar este flujo para evitar inconsistencias entre GitHub y la aplicación desplegada.
 
 ---
