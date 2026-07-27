@@ -54,6 +54,16 @@ const SUPPORTED_STUDIO_TOOLS = new Set([
 // Returns true when the user's last message clearly requires executing a
 // Studio action — not just asking for advice or code examples.
 
+const WRITE_INTENT_PATTERNS = [
+  /\b(crea[r]?|agrega[r]?|a[ñn]ade|añadir|insertar|haz|make|create|add|insert|build)\b/i,
+  /\b(modifica[r]?|cambia[r]?|edita[r]?|actualiza[r]?|modify|change|edit|update|rename|rename)\b/i,
+  /\b(elimina[r]?|borra[r]?|quita[r]?|delete|remove|destroy|clear)\b/i,
+  /\b(mueve[r]?|clona[r]?|copi[ae][r]?|move|clone|copy|duplicate)\b/i,
+];
+function hasWriteIntent(text) {
+  return !!text && WRITE_INTENT_PATTERNS.some(re => re.test(text));
+}
+
 const STUDIO_ACTION_PATTERNS = [
   // Mutation verbs
   /\b(crea[r]?|agrega[r]?|a[ñn]ade|añadir|insertar|haz|make|create|add|insert|build)\b/i,
@@ -155,7 +165,11 @@ function buildSystemPrompt(session, needsStudio) {
     '  T5. If TOOL_RESULT contains success=false or an "error" field → explain the failure. Never claim success.',
     '  T6. If TOOL_RESULT is successful, then and ONLY then describe what was done.',
     '  T7. Never tell the user to do something manually if a tool can do it.',
-    '  T8. For questions about the project (tree, scripts, GUIs), call get_tree or find_instances first.',
+    '  T8. For questions about the project (tree, scripts, GUIs), call get_tree or find_instances first. ' +
+      'NEVER call get_tree with no "path" on a real project — always target the specific service/folder ' +
+      'relevant to the request (e.g. "StarterGui", "ServerScriptService", "Workspace") with maxDepth 2-3. ' +
+      'A full untargeted tree wastes context and makes you lose track of the task. Widen the path only if ' +
+      'the scoped call comes back empty.',
     '  T9. Before the first mutating call, output one line starting with "PLAN:" listing the steps.',
     ' T10. Never delete or overwrite content unless the user explicitly asked for that exact change.',
     ' T11. Never invent Roblox property values, paths, or class names you haven\'t read from TOOL_RESULT.',
@@ -727,8 +741,32 @@ const WRITE_TOOLS = new Set([
 // ── Build TOOL_RESULT injection message ───────────────────────────────────
 // Framing is write-tool-aware: write tools get a strict "no code" rule,
 // read tools get a summarize rule that allows referencing content.
+// Small/free models lose track of the original task when a single
+// TOOL_RESULT dumps tens of thousands of tokens of raw JSON (a get_tree on
+// a real game can easily return 500+ nodes). Cap what actually goes into
+// the conversation and teach the model to scope its next query down
+// instead of re-requesting the same giant tree.
+const MAX_RESULT_CHARS = 6000;
+
+function truncateResultForModel(toolName, resultJson) {
+  if (resultJson.length <= MAX_RESULT_CHARS) return { text: resultJson, wasTruncated: false };
+  const cut = resultJson.slice(0, MAX_RESULT_CHARS);
+  const hint =
+    toolName === 'get_tree'
+      ? 'This tree was too large to show in full. On your NEXT get_tree call, pass a specific "path" ' +
+        '(e.g. "StarterGui", "ServerScriptService", a named folder) and a small "maxDepth" (2-3) to ' +
+        'narrow down to just the area you actually need — do not re-request the whole game root.'
+      : 'This result was too large to show in full. Narrow your next query (e.g. a more specific path, ' +
+        'name filter, or search term) instead of requesting everything again.';
+  return {
+    text: `${cut}\n…[TRUNCATED — ${resultJson.length} chars total, showing first ${MAX_RESULT_CHARS}]\n\n${hint}`,
+    wasTruncated: true,
+  };
+}
+
 function buildToolResultMessage(toolName, toolResult, isError) {
-  const resultJson = JSON.stringify(toolResult, null, 2);
+  const rawJson = JSON.stringify(toolResult, null, 2);
+  const { text: resultJson, wasTruncated } = truncateResultForModel(toolName, rawJson);
 
   if (isError) {
     return (
@@ -944,6 +982,7 @@ async function agentLoop(messages, apiKey, model, sessionId, res, needsStudio, t
   let headerSent = false;
   let toolEnforcementRetries = 0;
   let toolsExecuted = 0; // how many tools have actually run this turn
+  let writeToolsExecuted = 0; // how many of those were successful WRITE_TOOLS (create/update/etc.)
   const completedSteps = [];
   const taskEvents = [];
   const pendingSteps = Array.isArray(task?.plan) ? [...task.plan] : [];
@@ -1084,26 +1123,69 @@ async function agentLoop(messages, apiKey, model, sessionId, res, needsStudio, t
         continue;
       }
 
+      // ── After tools ran: read-only exploration, but the objective needed a build ──
+      // The classic failure mode: get_tree/find_instances/read_script succeed,
+      // the model produces a plain summary, and the loop was about to mark the
+      // task "completed" — even though the developer asked to CREATE/EDIT
+      // something and zero write tools ever ran. Give one explicit nudge
+      // before accepting that as done. Scanning the WHOLE conversation (not
+      // just the latest message) matters here: after a clarifying question,
+      // the latest user message is just the answer (e.g. "StarterGui porfa"),
+      // and the actual "crear una Gui…" request is a few turns back.
+      const anyWriteIntent = messages.some(m => m.role === 'user' && hasWriteIntent(m.content || ''));
+      if (
+        toolsExecuted > 0 &&
+        writeToolsExecuted === 0 &&
+        anyWriteIntent &&
+        round < MAX_ROUNDS - 1 &&
+        toolEnforcementRetries < MAX_TOOL_ENFORCEMENT_RETRIES
+      ) {
+        toolEnforcementRetries++;
+        messages = [
+          ...messages,
+          { role: 'assistant', content: text },
+          {
+            role: 'user',
+            content:
+              'SYSTEM: You only inspected the project so far (read-only tools) — you have not built or changed ' +
+              'anything yet. The developer\'s request requires creating/editing something. Do NOT summarize or ' +
+              'stop here. Using what you just learned from the tree/search, output the next TOOL:{...} to start ' +
+              'building (e.g. create_instance, create_script). Output ONLY that line.',
+          },
+        ];
+        continue;
+      }
+
       // No tool enforcement possible/left, and nothing ever actually ran.
       // Do NOT report this as a completed task — that was misleading the
       // developer into thinking Studio was updated when the plugin never
       // even received a command. Report it as failed instead.
       const neverExecuted = toolsExecuted === 0;
+      const readOnlyDespiteWriteIntent = !neverExecuted && writeToolsExecuted === 0 && anyWriteIntent;
+      const taskStatus = neverExecuted ? 'failed' : readOnlyDespiteWriteIntent ? 'incomplete' : 'completed';
       if (task?.taskId) {
         await persistTask({
-          status: neverExecuted ? 'failed' : 'completed',
+          status: taskStatus,
           currentTool: null,
           lastToolResult: null,
-          nextAction: neverExecuted
-            ? 'The AI could not produce a valid tool call. Try again, possibly with a simpler request.'
-            : 'Task complete. Review the verified result above.',
+          nextAction:
+            taskStatus === 'failed'
+              ? 'The AI could not produce a valid tool call. Try again, possibly with a simpler request.'
+              : taskStatus === 'incomplete'
+                ? 'The AI only inspected the project and never made the requested change. Ask it to continue/retry.'
+                : 'Task complete. Review the verified result above.',
         });
         emitWorkspaceEvent({
           id: 'workspace-task',
           type: 'task',
-          status: neverExecuted ? 'error' : 'completed',
-          label: neverExecuted ? 'Workspace task failed — no Studio action was executed' : 'Workspace task completed',
-          ...(neverExecuted && failure?.detail ? { error: failure.detail } : {}),
+          status: taskStatus === 'completed' ? 'completed' : 'error',
+          label:
+            taskStatus === 'failed'
+              ? 'Workspace task failed — no Studio action was executed'
+              : taskStatus === 'incomplete'
+                ? 'Workspace task incomplete — only inspected, nothing was built'
+                : 'Workspace task completed',
+          ...(taskStatus !== 'completed' && failure?.detail ? { error: failure.detail } : {}),
         });
       }
       if (neverExecuted && needsStudio) {
@@ -1184,6 +1266,7 @@ async function agentLoop(messages, apiKey, model, sessionId, res, needsStudio, t
     const toolResult = await executeStudioTool(sessionId, toolCall.name, toolCall.args || {});
     const isError = !!(toolResult && toolResult.error);
     toolsExecuted++;
+    if (!isError && WRITE_TOOLS.has(toolCall.name)) writeToolsExecuted++;
 
     // Timeline: tool done or error (updates the card)
     writeSSE(res, { timeline: {
