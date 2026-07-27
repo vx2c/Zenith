@@ -1153,6 +1153,9 @@ function renderWorkspaceEvents() {
   const summary = running?.label || (total ? `${completed}/${total} workspace steps complete` : 'Planning workspace task…');
   el('activity-summary').textContent = summary;
   el('activity-body').innerHTML = events.map(event => {
+    if (event.type === 'plan') {
+      return `<p class="workspace-plan-text">${esc(event.label || '')}</p>`;
+    }
     const status = event.status === 'done' ? 'completed' : event.status;
     const icon = status === 'running' ? '◌' : status === 'error' ? '!' : status === 'completed' ? '✓' : '•';
     const detail = event.detail || event.error || '';
