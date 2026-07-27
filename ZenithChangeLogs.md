@@ -201,3 +201,29 @@ Nunca sobrescribir registros anteriores. Siempre agregar la nueva entrada al fin
   - Fix del agente: ya no pregunta clarificación cuando el usuario ya dio suficiente contexto (nombre, ruta, servicio). Evita el comportamiento frustrante de pedir "¿cuál script?" cuando el usuario escribió "ServerScriptService.LeaderstatsSystem".
   - Fix de duplicados: los eventos `workspace_event` y `timeline` eran procesados ambos, creando dos tarjetas por cada acción de herramienta. Ahora solo se usa `timeline`.
   - Inline activity cards: las acciones del agente aparecen como tarjetas compactas dentro de la burbuja del mensaje (no en el panel accordion colapsado), con emoji, badge de estado y barra animada — visible sin ningún clic adicional.
+
+## [2026-07-27 — Agent Loop Critical Fix]
+
+- Archivos modificados:
+  - `api/chat.js`
+
+- Cambios realizados:
+
+  ### api/chat.js — Fix del loop del agente (bugs críticos)
+
+  **Bug 1 — AI usa nombre de herramienta inválido después de ejecutar tools:**
+  - El modelo a veces escribe `TOOL:{"name":"get_script",...}` (nombre no soportado) en vez de `read_script`. `extractToolCall` retornaba null, el loop terminaba, y el JSON crudo aparecía en el bubble del chat.
+  - Fix: Nuevo guard en rama `!toolCall` — si `toolsExecuted > 0` y el texto contiene `TOOL:` (intento de tool call que falló parsing), se hace un retry con lista de herramientas válidas.
+  - Fix adicional: `sanitizeForDisplay(text)` filtra líneas `TOOL:` del texto antes de streamarlo al usuario, evitando JSON crudo en el chat.
+
+  **Bug 2 — AI escribe PLAN sin ejecutar herramientas y el loop termina:**
+  - Causa raíz: `buildCallMessages` usaba `EXPLANATION_DIRECTIVE` cuando `toolsExecuted > 0 && !hasPendingWork`. Después de herramientas de lectura (find_instances + read_script), `hasPendingWork` siempre era false (pendingSteps viene vacío), forzando `EXPLANATION_DIRECTIVE` que le decía al AI "el objetivo está satisfecho, responde ahora". El AI obedecía y paraba, mostrando "Workspace task complete" sin haber creado nada.
+  - Fix principal: `buildCallMessages` ahora usa solo dos fases — `TOOL_CALL_DIRECTIVE` (round 0) y `CONTINUE_DIRECTIVE` (cualquier round donde toolsExecuted > 0). `EXPLANATION_DIRECTIVE` eliminado. `CONTINUE_DIRECTIVE` ya tiene escape hatch integrado: el AI puede terminar si detecta que el objetivo está completo.
+  - Fix secundario: nuevo guard en rama `!toolCall` — si `toolsExecuted > 0` y la respuesta contiene texto PLAN (PLAN: seguido de pasos numerados) sin TOOL call, se inyecta mensaje de sistema forzando al AI a emitir el primer `TOOL:{...}` del plan.
+
+  **Funciones nuevas:**
+  - `hasPlanText(text)`: detecta "PLAN:" seguido de pasos numerados en la respuesta del AI
+  - `sanitizeForDisplay(text)`: elimina líneas que empiezan con `TOOL:` del texto visible al usuario
+
+- Motivo:
+  - El agente creaba planes detallados y luego paraba sin ejecutarlos, requiriendo que el usuario repitiera el mensaje para que funcionara (comportamiento observado en screenshot del usuario). La causa era `EXPLANATION_DIRECTIVE` que se activaba prematuramente. Ahora el agente continúa hasta completar todos los pasos del plan.

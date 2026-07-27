@@ -443,6 +443,26 @@ function extractToolCall(text) {
   return parsed;
 }
 
+// ── Detect PLAN text in AI response ───────────────────────────────────────
+// Returns true when the AI wrote a multi-step plan (e.g. "PLAN:\n1. ...\n2. ...")
+// without emitting a TOOL call. Used to force the agent to start executing.
+function hasPlanText(text) {
+  if (!text) return false;
+  return /PLAN\s*:/i.test(text) && /\d+\.\s+\S/.test(text);
+}
+
+// ── Strip raw TOOL: lines from text shown to the user ─────────────────────
+// Prevents malformed/unsupported TOOL:{...} JSON from appearing as plain text
+// in the chat bubble when a tool call fails to parse.
+function sanitizeForDisplay(text) {
+  if (!text) return text;
+  return text
+    .split('\n')
+    .filter(line => !line.trimStart().startsWith('TOOL:'))
+    .join('\n')
+    .trim();
+}
+
 // ── Detect clarifying questions ────────────────────────────────────────────
 // When the agent is ambiguous about the target (many scripts, unnamed button,
 // etc.) it is smarter to ask than to guess. We detect this to avoid
@@ -820,16 +840,20 @@ const EXPLANATION_DIRECTIVE =
   '  • Never reproduce the full TOOL_RESULT verbatim.';
 
 function buildCallMessages(messages, toolsExecuted, hasPendingWork) {
-  // Three phases now instead of two:
-  //   0 tools executed yet                → TOOL_CALL_DIRECTIVE (pick first tool)
-  //   tools executed, plan still pending  → CONTINUE_DIRECTIVE  (keep going)
-  //   tools executed, nothing pending     → EXPLANATION_DIRECTIVE (wrap up)
+  // Two phases:
+  //   0 tools executed yet  → TOOL_CALL_DIRECTIVE  (pick first tool)
+  //   tools executed        → CONTINUE_DIRECTIVE   (keep going until AI decides done)
+  //
+  // EXPLANATION_DIRECTIVE is intentionally removed — it caused the agent to
+  // stop after read tools (find_instances, read_script) even when the real
+  // write work (create_gui, create_script, etc.) had not started yet.
+  // CONTINUE_DIRECTIVE already contains an escape hatch: "Only skip TOOL:{...}
+  // and explain instead if the TOOL_RESULT reveals the task is impossible or
+  // genuinely already complete." The AI will stop when it truly is done.
   const directive =
     toolsExecuted === 0
       ? TOOL_CALL_DIRECTIVE
-      : hasPendingWork
-        ? CONTINUE_DIRECTIVE
-        : EXPLANATION_DIRECTIVE;
+      : CONTINUE_DIRECTIVE;
   // Merge the directive INTO the first system message content rather than
   // appending a new system message at the end of the conversation.
   // Most models (including gpt-oss-20b) only honour system messages at
@@ -1022,6 +1046,44 @@ async function agentLoop(messages, apiKey, model, sessionId, res, needsStudio, t
         }
       }
 
+      // ── After tools ran: AI used an invalid/unsupported tool name ──────────
+      // This happens when the model writes TOOL:{"name":"get_script",...}
+      // (wrong name) instead of TOOL:{"name":"read_script",...}. The JSON
+      // parses fine but shape-validation rejects it. Give the AI one retry
+      // with an explicit list of valid tool names.
+      if (toolsExecuted > 0 && text.includes('TOOL:') && round < MAX_ROUNDS - 1) {
+        const supported = [...SUPPORTED_STUDIO_TOOLS].slice(0, 20).join(', ');
+        messages = [
+          ...messages,
+          { role: 'assistant', content: text },
+          {
+            role: 'user',
+            content:
+              'SYSTEM: Your TOOL:{...} call used an unsupported or malformed tool name. ' +
+              'Valid tool names include: ' + supported + '. ' +
+              'Output a corrected TOOL:{...} line now — one TOOL per response.',
+          },
+        ];
+        continue;
+      }
+
+      // ── After tools ran: AI wrote a PLAN but forgot the TOOL call ────────
+      // The model planned its next steps in prose (PLAN: 1. ... 2. ...) but
+      // did not emit a TOOL:{...} line to start executing. Force the first step.
+      if (toolsExecuted > 0 && hasPlanText(text) && round < MAX_ROUNDS - 1) {
+        messages = [
+          ...messages,
+          { role: 'assistant', content: text },
+          {
+            role: 'user',
+            content:
+              'SYSTEM: You wrote a PLAN but did not emit a TOOL:{...} call. ' +
+              'Do NOT restate the plan. Output ONLY the first TOOL:{...} line to begin executing step 1 now.',
+          },
+        ];
+        continue;
+      }
+
       // No tool enforcement possible/left, and nothing ever actually ran.
       // Do NOT report this as a completed task — that was misleading the
       // developer into thinking Studio was updated when the plugin never
@@ -1055,7 +1117,10 @@ async function agentLoop(messages, apiKey, model, sessionId, res, needsStudio, t
         res.end();
         return;
       }
-      streamTextToClient(res, usedModel, text, { headerAlreadySent: headerSent });
+      // Strip any raw TOOL: lines that weren't executed so they don't show
+      // as plain JSON in the chat bubble (e.g. unsupported tool after retries exhausted)
+      const displayText = sanitizeForDisplay(text);
+      streamTextToClient(res, usedModel, displayText, { headerAlreadySent: headerSent });
       headerSent = true;
       writeSSE(res, { done: true });
       res.end();
