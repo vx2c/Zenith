@@ -1010,10 +1010,15 @@ function toolDetailFor(name, args) {
 async function agentLoop(messages, apiKey, model, sessionId, res, needsStudio, task) {
   const MAX_ROUNDS = 12;        // increased for complex multi-step workflows
   const MAX_TOOL_ENFORCEMENT_RETRIES = 2; // inject reminder if tool skipped/malformed
+  const MAX_CONSECUTIVE_READS = 3;        // force a write after this many read-only rounds
   let headerSent = false;
   let toolEnforcementRetries = 0;
   let toolsExecuted = 0; // how many tools have actually run this turn
+<<<<<<< HEAD
   let writeToolsExecuted = 0; // how many of those were successful WRITE_TOOLS (create/update/etc.)
+=======
+  let consecutiveReadRounds = 0; // read-only tools in a row without any write
+>>>>>>> e3232b5 (fix: real task status, read-loop guard, workspace_event task reconnect)
   const completedSteps = [];
   const taskEvents = [];
   const pendingSteps = Array.isArray(task?.plan) ? [...task.plan] : [];
@@ -1051,6 +1056,25 @@ async function agentLoop(messages, apiKey, model, sessionId, res, needsStudio, t
   }
 
   for (let round = 0; round < MAX_ROUNDS; round++) {
+    // ── Read-loop guard: force write after MAX_CONSECUTIVE_READS read-only tools ──
+    // Prevents the model from looping on get_tree / find_instances / read_script
+    // without ever transitioning to create_gui / create_script / update_script.
+    if (consecutiveReadRounds >= MAX_CONSECUTIVE_READS) {
+      const readCount = consecutiveReadRounds;
+      consecutiveReadRounds = 0;
+      messages = [
+        ...messages,
+        {
+          role: 'user',
+          content:
+            `SYSTEM: You have called ${readCount} read-only tools in a row without writing or creating anything. ` +
+            'You already have enough context to build. Your next response MUST output a write/create TOOL call: ' +
+            'create_script, create_instance, create_gui, update_script, append_script, set_properties, or similar. ' +
+            'Do NOT call get_tree, find_instances, read_script, search_scripts, or any other read tool.',
+        },
+      ];
+    }
+
     // Inject the per-phase directive as the final system message so the
     // model always reads the current-phase instruction last.
     const hasPendingWork = pendingSteps.length > 0;
@@ -1321,6 +1345,18 @@ async function agentLoop(messages, apiKey, model, sessionId, res, needsStudio, t
     const isError = !!(toolResult && toolResult.error);
     toolsExecuted++;
     if (!isError && WRITE_TOOLS.has(toolCall.name)) writeToolsExecuted++;
+
+    // Track consecutive read-only rounds for the read-loop guard
+    const READ_ONLY_TOOLS = new Set([
+      'ping', 'get_tree', 'find_instances', 'get_selection', 'search_scripts',
+      'read_script', 'get_properties', 'get_attributes', 'get_output_logs',
+      'analyze_project', 'summarize_project', 'describe_instance',
+    ]);
+    if (!isError && READ_ONLY_TOOLS.has(toolCall.name)) {
+      consecutiveReadRounds++;
+    } else {
+      consecutiveReadRounds = 0; // any write tool resets the counter
+    }
 
     // Timeline: tool done or error (updates the card)
     writeSSE(res, { timeline: {
