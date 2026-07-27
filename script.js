@@ -24,6 +24,8 @@ const state = {
   workspaceTaskId: null,
   workspaceEvents: [],
   cardsContainer:  null,   // ref to .z-cards-container in the current live bubble
+  finalTaskStatus: null,   // 'completed' | 'error' | 'blocked' — from backend workspace_event type:'task'
+  finalTaskLabel:  null,   // human-readable final task label from backend
 };
 
 // ── Storage ──────────────────────────────────
@@ -655,6 +657,8 @@ async function sendMsg(content) {
   let stopped    = false;
   state.workspaceTaskId = `task-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   state.workspaceEvents = [];
+  state.finalTaskStatus = null;
+  state.finalTaskLabel  = null;
   renderWorkspaceEvents();
 
   try {
@@ -704,7 +708,12 @@ async function sendMsg(content) {
             textEl.innerHTML = md(fullText);
             box.scrollTop = box.scrollHeight;
           }
-            // workspace_event is a legacy duplicate — ignored; use only timeline events
+            // workspace_event: only process type='task' (final completion status).
+            // Tool-level events are covered by timeline and ignored here to avoid dupes.
+            if (parsed.workspace_event && parsed.workspace_event.type === 'task') {
+              state.finalTaskStatus = parsed.workspace_event.status; // 'completed'|'error'|'blocked'
+              state.finalTaskLabel  = parsed.workspace_event.label;
+            }
             if (parsed.timeline) {
               upsertWorkspaceEvent({
                 id: `timeline-${parsed.timeline.id}`,
@@ -742,7 +751,14 @@ async function sendMsg(content) {
   stopThinkingStates();
   clearRespondingModel();
   panel.classList.toggle('hidden', !state.pluginToken);
-  el('activity-summary').textContent = stopped ? 'Workspace task stopped' : 'Workspace task complete';
+  // Use the actual backend status if available; fall back to generic text
+  const taskSummaryText = stopped
+    ? 'Workspace task stopped'
+    : state.finalTaskLabel
+      || (state.finalTaskStatus === 'error'   ? 'Workspace task failed'
+        : state.finalTaskStatus === 'blocked' ? 'Task limit reached — continue in a new message'
+        : 'Workspace task complete');
+  el('activity-summary').textContent = taskSummaryText;
 
   const responseMs = Date.now() - t0;
 
