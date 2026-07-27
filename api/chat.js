@@ -80,6 +80,22 @@ function detectStudioIntent(messages) {
   return STUDIO_ACTION_PATTERNS.some(re => re.test(text));
 }
 
+// ── Context sufficiency check ──────────────────────────────────────────────
+// Returns true when the user's message already contains enough identifying
+// information to act without asking a clarifying question.
+// Prevents the agent from asking "which script?" when the user already said
+// "ServerScriptService.LeaderstatsSystem" or mentioned a specific name.
+function hasEnoughContext(text) {
+  if (!text) return false;
+  // Dot-path like "ServerScriptService.LeaderstatsSystem" or "StarterGui.Frame.Button"
+  if (/\b[A-Z][a-zA-Z]+\.[A-Z][a-zA-Z0-9_]/.test(text)) return true;
+  // Quoted name: "LeaderstatsSystem" or 'MyScript'
+  if (/["'][A-Za-z][A-Za-z0-9_]+["']/.test(text)) return true;
+  // Roblox services mentioned with context (implies a specific target location)
+  if (/\b(ServerScriptService|StarterGui|StarterPlayerScripts|ReplicatedStorage|Workspace|Players|SoundService|Teams|Lighting)\b/i.test(text)) return true;
+  return false;
+}
+
 function parseJsonBody(req) {
   return new Promise((resolve, reject) => {
     let body = '';
@@ -150,9 +166,9 @@ function buildSystemPrompt(session, needsStudio) {
       'first (structure only, no scripts), THEN call create_script separately for each script\'s logic, using ' +
       'the exact path you just created.',
     ' T15. CLARIFICATION OVER GUESSING: If the developer\'s request is ambiguous (e.g. "my script", "that button", ' +
-      '"the error" without specifying which one) and you would need to run get_tree/find_instances just to guess, ' +
-      'ask ONE concise clarifying question instead. Example: "I see several scripts in ServerScriptService — ' +
-      'which one has the bug? (name or path)" After they answer, proceed with the tool immediately without asking again.',
+      '"the error") AND their message contains NO dot-path (e.g. ServerScriptService.X), quoted name, or specific ' +
+      'Roblox service name, ask ONE concise clarifying question. NEVER ask for info the user already provided — ' +
+      'if they gave a path or name, use find_instances/search_scripts immediately without asking.',
     '',
     'Available tools:',
     '  TOOL:{"name":"ping","args":{}}',
@@ -769,8 +785,9 @@ const TOOL_CALL_DIRECTIVE =
   'Do NOT write Lua code, explanations, or commentary of any kind.\n' +
   'Do NOT call more than one tool — one TOOL:{...} per response, then stop.\n' +
   'EXCEPTION — CLARIFY FIRST: If the target is genuinely ambiguous (developer said "my script" or "the button" ' +
-  'without a specific name, and there could be many matches), output a single short question instead of a TOOL call. ' +
-  'Keep it to one sentence ending with a "?" — no code, no lists. After they answer, use the tool immediately.';
+  'without any specific name, path, or Roblox service — and there could be many matches), output a single short ' +
+  'question instead of a TOOL call. Do NOT ask if the user already gave a dot-path, service name, or quoted name — ' +
+  'use find_instances/search_scripts immediately. One sentence ending with "?" — no code, no lists.';
 
 // CONTINUE mode — a tool has run AND the original plan still has unfinished
 // steps. Leads with "keep executing", not "respond now", so the model
@@ -966,8 +983,12 @@ async function agentLoop(messages, apiKey, model, sessionId, res, needsStudio, t
       // ── Clarifying question: agent decided to ask instead of guessing ─────
       // This is VALID intelligent behavior. If the AI responded with a short
       // question (no tool, no code), stream it and let the user answer.
+      // Only allow it if the user's message genuinely lacks a specific target
+      // (no dot-path, quoted name, or Roblox service) — otherwise the agent
+      // should use find_instances/search_scripts instead of asking.
       // Do NOT treat this as a failed tool call.
-      if (needsStudio && toolsExecuted === 0 && isAskingClarification(text)) {
+      const lastUserMsgForCheck = [...messages].reverse().find(m => m.role === 'user' && !m.content?.startsWith('TOOL_RESULT') && !m.content?.startsWith('SYSTEM:'));
+      if (needsStudio && toolsExecuted === 0 && isAskingClarification(text) && !hasEnoughContext(lastUserMsgForCheck?.content || '')) {
         if (!headerSent) {
           writeSSE(res, { provider: 'OpenRouter', model: usedModel });
           headerSent = true;

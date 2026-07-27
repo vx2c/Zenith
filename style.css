@@ -879,6 +879,58 @@ html.dark .workspace-event-icon { background: #f0f0f0; color: #111; }
 html.dark .workspace-event.completed .workspace-event-icon { background: #22c55e; color: #07130b; }
 html.dark .workspace-event.error .workspace-event-icon { background: #ef4444; color: #fff; }
 
+/* ── Inline Activity Cards (z-card) ─────────────────────────────────── */
+.z-cards-container {
+  display: flex; flex-direction: column; gap: 5px;
+  margin-bottom: 8px;
+}
+.z-cards-container.hidden { display: none; }
+.z-card {
+  display: flex; align-items: center; gap: 8px;
+  background: #f9fafb; border: 1px solid #e5e7eb;
+  border-radius: 8px; padding: 7px 10px;
+  font-size: 0.82rem; position: relative; overflow: hidden;
+  transition: border-color 0.2s;
+}
+.z-card-emoji { font-size: 1rem; flex-shrink: 0; line-height: 1; }
+.z-card-body { display: flex; flex-direction: column; gap: 1px; min-width: 0; flex: 1; }
+.z-card-label { font-weight: 600; color: #111827; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.z-card-detail { font-size: 0.73rem; color: #6b7280; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.z-card-badge {
+  flex-shrink: 0; font-size: 0.68rem; font-weight: 700;
+  letter-spacing: 0.04em; text-transform: uppercase;
+  padding: 2px 6px; border-radius: 4px;
+}
+.z-card-badge--running  { background: #fef3c7; color: #b45309; }
+.z-card-badge--completed{ background: #d1fae5; color: #065f46; }
+.z-card-badge--error    { background: #fee2e2; color: #991b1b; }
+.z-card-badge--plan     { background: #ede9fe; color: #5b21b6; }
+.z-card-bar-wrap {
+  position: absolute; bottom: 0; left: 0; right: 0; height: 2px;
+  background: transparent;
+}
+.z-card-bar { height: 2px; width: 0; transition: width 0.4s ease; background: transparent; }
+.z-card--running  { border-color: #fbbf24; }
+.z-card--running .z-card-bar { background: #f59e0b; animation: z-bar-pulse 1.4s ease-in-out infinite; }
+.z-card--completed{ border-color: #10b981; }
+.z-card--completed .z-card-bar { background: #10b981; width: 100%; }
+.z-card--error    { border-color: #f87171; }
+.z-card--error .z-card-bar { background: #ef4444; width: 100%; }
+@keyframes z-bar-pulse {
+  0%   { width: 0%; opacity: 1; }
+  60%  { width: 85%; opacity: 1; }
+  100% { width: 85%; opacity: 0.5; }
+}
+html.dark .z-card { background: rgba(30,30,30,0.9); border-color: rgba(255,255,255,0.1); }
+html.dark .z-card-label { color: #f0f0f0; }
+html.dark .z-card-detail { color: #9ca3af; }
+html.dark .z-card--running   { border-color: #fbbf24; }
+html.dark .z-card--completed { border-color: #34d399; }
+html.dark .z-card--error     { border-color: #f87171; }
+html.dark .z-card-badge--running   { background: rgba(251,191,36,0.15);  color: #fbbf24; }
+html.dark .z-card-badge--completed { background: rgba(52,211,153,0.15);  color: #34d399; }
+html.dark .z-card-badge--error     { background: rgba(248,113,113,0.15); color: #f87171; }
+
 .act-group { margin-bottom: 10px; }
 .act-group:last-child { margin-bottom: 0; }
 .act-phase {

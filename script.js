@@ -23,6 +23,7 @@ const state = {
   pluginStatusReady: false,
   workspaceTaskId: null,
   workspaceEvents: [],
+  cardsContainer:  null,   // ref to .z-cards-container in the current live bubble
 };
 
 // ── Storage ──────────────────────────────────
@@ -161,6 +162,22 @@ function startTypewriter(el, phrases, opts = {}) {
   }
   loop();
 }
+
+const TOOL_EMOJI_MAP = {
+  ping:              '🏓',
+  get_tree:          '🌳',
+  find_instances:    '🔍',
+  read_script:       '📄',
+  search_scripts:    '🔎',
+  create_script:     '✏️',
+  edit_script:       '✏️',
+  create_instance:   '🧱',
+  create_gui:        '🖼️',
+  delete_instance:   '🗑️',
+  set_property:      '⚙️',
+  run_lua:           '▶️',
+  describe_instance: '📋',
+};
 
 const LANDING_PHRASES = [
   'hola soy una asistente de IA que se conecta a tus proyectos de roblox',
@@ -472,10 +489,14 @@ function aiMsgEl(text, live, timestamp, model, responseMs, liked) {
   const nm  = document.createElement('div');
   nm.className = 'ai-name';
   nm.textContent = 'xZenith';
+  const cardsEl = document.createElement('div');
+  cardsEl.className = 'z-cards-container hidden';
+
   const tx  = document.createElement('div');
   tx.className = 'ai-text';
   if (!live && text) tx.innerHTML = md(text);
   cd.appendChild(nm);
+  cd.appendChild(cardsEl);
   cd.appendChild(tx);
 
   // Actions row (shown after response)
@@ -489,7 +510,7 @@ function aiMsgEl(text, live, timestamp, model, responseMs, liked) {
 
   w.appendChild(av);
   w.appendChild(cd);
-  return { wrap: w, textEl: tx };
+  return { wrap: w, textEl: tx, cardsEl };
 }
 
 function buildMsgActions(text, timestamp, model, responseMs, liked) {
@@ -614,16 +635,17 @@ async function sendMsg(content) {
   box.scrollTop = box.scrollHeight;
   renderSidebar();
 
-  // Activity
+  // Activity panel — always hidden; inline cards appear in the bubble instead
   const panel = el('activity-panel');
-  panel.classList.toggle('hidden', !state.pluginToken);
+  panel.classList.add('hidden');
   el('activity-body').innerHTML = '';
   el('activity-body').classList.remove('open');
   el('activity-arrow').classList.remove('flipped');
   startThinkingStates();
 
   // Live AI bubble
-  const { wrap, textEl } = aiMsgEl('', true);
+  const { wrap, textEl, cardsEl } = aiMsgEl('', true);
+  state.cardsContainer = cardsEl;
   box.appendChild(wrap);
   box.scrollTop = box.scrollHeight;
 
@@ -682,10 +704,8 @@ async function sendMsg(content) {
             textEl.innerHTML = md(fullText);
             box.scrollTop = box.scrollHeight;
           }
-            if (parsed.workspace_event) {
-              upsertWorkspaceEvent(parsed.workspace_event);
-            }
-            if (parsed.timeline && !parsed.workspace_event) {
+            // workspace_event is a legacy duplicate — ignored; use only timeline events
+            if (parsed.timeline) {
               upsertWorkspaceEvent({
                 id: `timeline-${parsed.timeline.id}`,
                 type: parsed.timeline.status === 'plan' ? 'plan' : 'tool',
@@ -695,6 +715,8 @@ async function sendMsg(content) {
                 detail: parsed.timeline.detail,
                 error: parsed.timeline.error,
               });
+              renderInlineCards(state.cardsContainer, state.workspaceEvents.filter(e => e.type === 'tool'));
+              box.scrollTop = box.scrollHeight;
             }
           if (parsed.error) {
             fullText = parsed.error;
@@ -1094,14 +1116,36 @@ function upsertWorkspaceEvent(event) {
   renderWorkspaceEvents();
 }
 
+function renderInlineCards(container, events) {
+  if (!container) return;
+  if (!events || events.length === 0) { container.classList.add('hidden'); return; }
+  container.classList.remove('hidden');
+  // Update in-place: add/update individual card elements by their id
+  events.forEach(event => {
+    const status = event.status === 'done' ? 'completed' : (event.status || 'running');
+    const emoji  = TOOL_EMOJI_MAP[event.tool] || '🔧';
+    const label  = event.label || event.tool || 'Workspace step';
+    const cardId = `z-card-${CSS.escape(event.id)}`;
+    let card = container.querySelector(`[data-zid="${CSS.escape(event.id)}"]`);
+    if (!card) {
+      card = document.createElement('div');
+      card.dataset.zid = event.id;
+      container.appendChild(card);
+    }
+    card.className = `z-card z-card--${status}`;
+    card.innerHTML = `<span class="z-card-emoji">${emoji}</span>` +
+      `<div class="z-card-body"><span class="z-card-label">${esc(label)}</span>` +
+      (event.error || event.detail ? `<span class="z-card-detail">${esc(event.error || event.detail)}</span>` : '') +
+      `</div><span class="z-card-badge z-card-badge--${status}">${status === 'running' ? 'Running…' : status === 'error' ? 'Error' : 'Done'}</span>` +
+      `<div class="z-card-bar-wrap"><div class="z-card-bar"></div></div>`;
+  });
+}
+
 function renderWorkspaceEvents() {
   const panel = el('activity-panel');
   if (!panel) return;
-  if (!state.pluginToken) {
-    panel.classList.add('hidden');
-    return;
-  }
-  panel.classList.remove('hidden');
+  // Panel is always hidden — inline cards in the bubble handle display
+  panel.classList.add('hidden');
   const events = state.workspaceEvents || [];
   const completed = events.filter(e => e.status === 'completed' || e.status === 'done').length;
   const total = events.filter(e => e.type === 'tool').length;

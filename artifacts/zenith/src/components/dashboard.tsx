@@ -265,16 +265,7 @@ function useChat(sessionId?: string | null) {
             if (parsed.timeline) {
               updateTimeline(parsed.timeline as TimelineEntry);
             }
-            if (parsed.workspace_event) {
-              updateTimeline({
-                id: parsed.workspace_event.id,
-                label: parsed.workspace_event.label,
-                status: parsed.workspace_event.status === 'completed' ? 'done' : parsed.workspace_event.status,
-                tool: parsed.workspace_event.tool,
-                detail: parsed.workspace_event.detail,
-                error: parsed.workspace_event.error,
-              } as TimelineEntry);
-            }
+            // workspace_event is a legacy duplicate of timeline — ignore it here
             if (parsed.content) {
               setMessages((prev) => {
                 const updated = [...prev];

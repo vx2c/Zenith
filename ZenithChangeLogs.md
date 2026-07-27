@@ -163,3 +163,41 @@ Nunca sobrescribir registros anteriores. Siempre agregar la nueva entrada al fin
 
 - Motivo:
   - "Zenith" es un nombre muy genérico con múltiples proyectos no relacionados usando variantes similares en el mismo espacio (Roblox + IA), incluyendo un "ZenIth" asociado a herramientas de exploit/cheat — mala compañía de marca. El dominio `xzenith.net` se mantiene sin cambios.
+
+## [2026-07-27]
+
+- Archivos modificados:
+  - `api/chat.js`
+  - `artifacts/zenith/src/components/dashboard.tsx`
+  - `script.js`
+  - `style.css`
+
+- Cambios realizados:
+
+  ### api/chat.js
+  - Agregado `hasEnoughContext(text)`: detecta si el mensaje del usuario ya contiene un dot-path (e.g. `ServerScriptService.X`), nombre entre comillas, o nombre de servicio Roblox — en cuyo caso la clarificación es innecesaria.
+  - La comprobación de clarificación en `agentLoop` ahora requiere AMBAS condiciones: `isAskingClarification(text)` AND `!hasEnoughContext(lastUserMsg)`. Si el usuario ya dio un nombre/ruta, el agente ya no puede preguntar — debe ejecutar la herramienta de inmediato.
+  - Regla T15 en el system prompt actualizada: especifica que NUNCA se debe pedir información que el usuario ya proporcionó (si hay dot-path, nombre o servicio, ir directo a `find_instances`/`search_scripts`).
+  - `TOOL_CALL_DIRECTIVE` actualizado: la excepción CLARIFY FIRST ahora aclara explícitamente que no aplica cuando el usuario ya dio ruta, nombre entre comillas, o servicio Roblox.
+
+  ### artifacts/zenith/src/components/dashboard.tsx
+  - Eliminado el bloque `if (parsed.workspace_event)` del bucle SSE de `useChat`. Este bloque creaba entradas duplicadas en la timeline junto con los eventos `timeline` correctos. Ahora solo se procesan eventos `timeline`.
+
+  ### script.js
+  - Agregado `TOOL_EMOJI_MAP`: mapeo de nombre de herramienta a emoji (🔍, 📄, ✏️, 🧱, etc.).
+  - Agregado `cardsContainer: null` al objeto `state`.
+  - `aiMsgEl()` ahora crea un div `.z-cards-container.hidden` entre el nombre y el texto, y lo retorna como `cardsEl`.
+  - `sendMsg()`: captura `cardsEl` de `aiMsgEl`, lo guarda en `state.cardsContainer`, y siempre oculta el panel de actividad (activity-panel).
+  - Bloque SSE: eliminado procesamiento de `workspace_event` (duplicado legacy). Solo se procesan eventos `timeline`, que llaman a `renderInlineCards(state.cardsContainer, ...)` para actualizar las tarjetas en la burbuja activa.
+  - Agregada función `renderInlineCards(container, events)`: renderiza tarjetas inline en el bubble del mensaje usando el emoji, label, badge de estado y barra de progreso animada. Actualiza en-place los elementos existentes por `data-zid`.
+  - `renderWorkspaceEvents()` ahora siempre oculta el panel (el panel accordion ya no se usa para mostrar datos).
+
+  ### style.css
+  - Agregadas clases `.z-cards-container`, `.z-card`, `.z-card-emoji`, `.z-card-body`, `.z-card-label`, `.z-card-detail`, `.z-card-badge` (y variantes `--running/--completed/--error/--plan`), `.z-card-bar-wrap`, `.z-card-bar`.
+  - Animación `@keyframes z-bar-pulse` para barra de progreso en estado running.
+  - Estilos dark mode para todas las variantes de z-card.
+
+- Motivo:
+  - Fix del agente: ya no pregunta clarificación cuando el usuario ya dio suficiente contexto (nombre, ruta, servicio). Evita el comportamiento frustrante de pedir "¿cuál script?" cuando el usuario escribió "ServerScriptService.LeaderstatsSystem".
+  - Fix de duplicados: los eventos `workspace_event` y `timeline` eran procesados ambos, creando dos tarjetas por cada acción de herramienta. Ahora solo se usa `timeline`.
+  - Inline activity cards: las acciones del agente aparecen como tarjetas compactas dentro de la burbuja del mensaje (no en el panel accordion colapsado), con emoji, badge de estado y barra animada — visible sin ningún clic adicional.
