@@ -64,6 +64,22 @@ function hasWriteIntent(text) {
   return !!text && WRITE_INTENT_PATTERNS.some(re => re.test(text));
 }
 
+// Small/free fallback models are heavily RLHF'd to disclaim real-world
+// capability ("I don't have real-time access", "I'm just an AI") and can
+// say this even when the system prompt explicitly states the opposite.
+// Catch it and correct it rather than let a false denial reach the user.
+const CAPABILITY_DENIAL_PATTERNS = [
+  /no\s+(estoy|tengo)\s+.{0,20}(conectad|acceso)/i,
+  /not\s+(actually\s+)?connected\s+to\s+(your|the)\s+(roblox|studio)/i,
+  /(don'?t|do\s+not)\s+have\s+(real-?time\s+)?access\s+to\s+(your|the)\s+(roblox|studio|project)/i,
+  /i\s+(can'?t|cannot)\s+execute\s+(tools|actions|commands)\s+(inside|in|within)\s+(it|studio|your\s+project)/i,
+  /tendrías\s+que\s+implementarlo\s+tú\s+mismo/i,
+  /you('ll|\s+will)\s+need\s+to\s+implement\s+this\s+yourself/i,
+];
+function deniesCapability(text) {
+  return !!text && CAPABILITY_DENIAL_PATTERNS.some(re => re.test(text));
+}
+
 const STUDIO_ACTION_PATTERNS = [
   // Mutation verbs
   /\b(crea[r]?|agrega[r]?|a[ñn]ade|añadir|insertar|haz|make|create|add|insert|build)\b/i,
@@ -145,6 +161,10 @@ function buildSystemPrompt(session, needsStudio) {
 
   const studioContext = [
     '\n\n--- STUDIO CONNECTED ---',
+    'You ARE connected to the developer\'s live Roblox Studio session RIGHT NOW, through a real plugin. ' +
+      'NEVER say things like "I don\'t have real-time access", "I can\'t execute tools", "I\'m not connected", ' +
+      'or "you\'ll need to implement this yourself" — all of that is FALSE while this section is present in your ' +
+      'instructions. If the developer asks whether you\'re connected, confirm YES and name the place below.',
     session.placeId   ? `Place ID: ${session.placeId}` : '',
     session.username  ? `Creator: ${session.username}` : '',
     session.placeName ? `Place: ${session.placeName}` : '',
@@ -383,13 +403,20 @@ function validateToolCall(toolName, args) {
   // create_instance / create_ui_element: className is mandatory.
   if (toolName === 'create_instance' || toolName === 'create_ui_element') {
     if (!args.className || typeof args.className !== 'string' || !args.className.trim()) {
-      return `"${toolName}" requires a non-empty "className" (e.g. "ScreenGui", "TextLabel", "Part", "Frame").`;
+      return `"${toolName}" requires a non-empty "className" (e.g. "ScreenGui", "TextLabel", "Part", "Frame"). ` +
+        `Correct shape: TOOL:{"name":"create_instance","args":{"parent":"StarterGui","name":"MyGui","className":"ScreenGui"}}`;
     }
     if (!args.name || typeof args.name !== 'string' || !args.name.trim()) {
-      return `"${toolName}" requires a non-empty "name" for the new instance.`;
+      return `"${toolName}" requires a non-empty "name" for the new instance. ` +
+        `Correct shape: TOOL:{"name":"create_instance","args":{"parent":"StarterGui","name":"MyGui","className":"ScreenGui"}}. ` +
+        `If you're adding a piece (e.g. a button) to something you just created, do NOT call create_instance again for it — ` +
+        `use a "children" array on the parent's create_instance call instead, or set "parent" to the exact path that was ` +
+        `just returned in the previous TOOL_RESULT.`;
     }
     if (!args.parent || typeof args.parent !== 'string' || !args.parent.trim()) {
-      return `"${toolName}" requires a non-empty "parent" path where the instance will be created.`;
+      return `"${toolName}" requires a non-empty "parent" path where the instance will be created. ` +
+        `Use the exact "path" value returned by the previous successful TOOL_RESULT (e.g. "StarterGui.MyGui"), ` +
+        `not a guessed name. Correct shape: TOOL:{"name":"create_instance","args":{"parent":"StarterGui.MyGui","name":"MyButton","className":"TextButton"}}`;
     }
   }
 
@@ -838,9 +865,11 @@ function buildToolEnforcementMessage(userContent, failure) {
 
 const TOOL_CALL_DIRECTIVE =
   'DIRECTIVE — TOOL SELECTION MODE:\n' +
-  'Output the next TOOL:{...} JSON line needed to fulfil this request.\n' +
-  'One optional "PLAN: ..." prefix line is allowed (one sentence, no code).\n' +
-  'Do NOT write Lua code, explanations, or commentary of any kind.\n' +
+  'Start with a "PLAN: <one short sentence>" line saying what you\'re about to do and why — this line IS shown ' +
+  'to the developer as your reasoning, so make it specific and useful (e.g. "PLAN: Checking StarterGui for an ' +
+  'existing GUI before creating a new one."), never generic filler like "PLAN: Working on it".\n' +
+  'Then output the TOOL:{...} JSON line needed to fulfil this request.\n' +
+  'Do NOT write Lua code, explanations, or commentary beyond the PLAN line.\n' +
   'Do NOT call more than one tool — one TOOL:{...} per response, then stop.\n' +
   'EXCEPTION — CLARIFY FIRST: If the target is genuinely ambiguous (developer said "my script" or "the button" ' +
   'without any specific name, path, or Roblox service — and there could be many matches), output a single short ' +
@@ -854,10 +883,12 @@ const CONTINUE_DIRECTIVE =
   'DIRECTIVE — CONTINUE EXECUTION MODE:\n' +
   'You have received a TOOL_RESULT, but the plan is NOT finished yet.\n' +
   'Do NOT write a final response. Do NOT stop here.\n' +
-  'Output ONLY the next TOOL:{...} JSON line required to complete the ' +
+  'Start with a "PLAN: <one short sentence>" line saying what you\'re about to do NEXT and why, based on what ' +
+  'you just learned — this line IS shown to the developer as your reasoning (e.g. "PLAN: StarterGui is empty, ' +
+  'creating the GUI now."). Never generic filler.\n' +
+  'Then output the next TOOL:{...} JSON line required to complete the ' +
   'original request (e.g. after finding/checking something, proceed to ' +
   'create/update whatever the plan requires next).\n' +
-  'One optional "PLAN: ..." prefix line is allowed (one sentence, no code).\n' +
   'Only skip TOOL:{...} and explain instead if the TOOL_RESULT reveals the ' +
   'task is impossible or genuinely already complete.';
 
@@ -1042,6 +1073,29 @@ async function agentLoop(messages, apiKey, model, sessionId, res, needsStudio, t
 
     if (!toolCall) {
       const failure = describeToolCallFailure(text);
+
+      // ── False capability denial: correct it, don't let it reach the user ──
+      // agentLoop only ever runs when a real, currently-valid session was
+      // already confirmed by the caller (sessionId is only passed through
+      // from the `if (session)` branch). If the model claims it has no
+      // access anyway, that's a hallucinated refusal from the underlying
+      // model, not a true system state — correct it immediately.
+      if (sessionId && deniesCapability(text) && round < MAX_ROUNDS - 1 && toolEnforcementRetries < MAX_TOOL_ENFORCEMENT_RETRIES) {
+        toolEnforcementRetries++;
+        messages = [
+          ...messages,
+          { role: 'assistant', content: text },
+          {
+            role: 'user',
+            content:
+              'SYSTEM: That is FALSE — you ARE connected to a live Roblox Studio session right now via a real ' +
+              'plugin, and you DO have working tools (get_tree, create_instance, create_script, etc.). Do not ' +
+              'say otherwise again in this conversation. Answer the developer\'s actual question, and if their ' +
+              'request needs a Studio action, use the appropriate TOOL:{...} now.',
+          },
+        ];
+        continue;
+      }
 
       // ── Clarifying question: agent decided to ask instead of guessing ─────
       // This is VALID intelligent behavior. If the AI responded with a short
