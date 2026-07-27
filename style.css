@@ -879,6 +879,16 @@ html.dark .workspace-event-icon { background: #f0f0f0; color: #111; }
 html.dark .workspace-event.completed .workspace-event-icon { background: #22c55e; color: #07130b; }
 html.dark .workspace-event.error .workspace-event-icon { background: #ef4444; color: #fff; }
 
+.workspace-plan-text {
+  margin: 10px 4px 6px;
+  font-size: 0.78rem;
+  font-style: italic;
+  color: #6b7280;
+  line-height: 1.4;
+}
+.workspace-plan-text:first-child { margin-top: 4px; }
+html.dark .workspace-plan-text { color: #9ca3af; }
+
 /* ── Inline Activity Cards (z-card) ─────────────────────────────────── */
 .z-cards-container {
   display: flex; flex-direction: column; gap: 5px;
