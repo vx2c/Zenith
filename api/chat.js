@@ -140,6 +140,41 @@ function hasEnoughContext(text) {
   return false;
 }
 
+// ── Extract mentioned script/system names from user query ─────────────────
+// Returns array of identifiers that the user explicitly referenced.
+// This allows the agent to verify it has read ALL mentioned scripts before writing.
+function extractMentionedTargets(messages) {
+  const last = messages[messages.length - 1];
+  if (!last || last.role !== 'user') return [];
+  const text = last.content || '';
+  
+  const targets = new Set();
+  
+  // Match dot-paths: ServerScriptService.DeathMoneyHandler
+  const dotPathRegex = /\b([A-Z][a-zA-Z0-9_]*\.[A-Z][a-zA-Z0-9_]*)\b/g;
+  for (const match of text.matchAll(dotPathRegex)) {
+    targets.add(match[1]);
+  }
+  
+  // Match quoted names: "DeathMoneyHandler" or 'MoneyScript'
+  const quotedRegex = /["']([A-Za-z][A-Za-z0-9_]*)["']/g;
+  for (const match of text.matchAll(quotedRegex)) {
+    targets.add(match[1]);
+  }
+  
+  // Match capitalized CamelCase names that look like script/system identifiers
+  // Only if they appear near keywords like "script", "system", "handler", "manager"
+  const systemKeywords = /\b(script|system|handler|manager|module|service)\b/i;
+  if (systemKeywords.test(text)) {
+    const camelCaseRegex = /\b([A-Z][a-zA-Z0-9]*(?:Handler|Manager|Script|System|Module|Service))\b/g;
+    for (const match of text.matchAll(camelCaseRegex)) {
+      targets.add(match[1]);
+    }
+  }
+  
+  return Array.from(targets);
+}
+
 function parseJsonBody(req) {
   return new Promise((resolve, reject) => {
     let body = '';
@@ -174,7 +209,8 @@ function buildSystemPrompt(session, needsStudio) {
       'SMART AGENT RULE: If the request is ambiguous — e.g. the developer says "my script" or "that button" but you ' +
       'do not know which instance they mean — ask ONE short clarifying question instead of guessing or running ' +
       'get_tree blindly. Example: "I can see multiple scripts — which one do you mean: ServerScript, LocalScript, or ModuleScript?" ' +
-      'After they answer, execute the tool immediately. When the target is clear, execute without asking.'
+      'After they answer, execute the tool immediately. When the target is clear, execute without asking.\n' +
+      'WORKSPACE AGENT RULE: If the developer mentions specific script names, systems, or handlers (e.g. "DeathMoneyHandler", "LeaderstatsManager", "MoneyScript"), you MUST read_script for EACH mentioned target BEFORE making ANY changes. Never assume how an existing system works. Never replace existing systems unless explicitly asked. If a script returns empty content, report it and continue investigating other mentioned targets before proposing solutions.'
     : '';
 
   const studioContext = [
@@ -1079,6 +1115,10 @@ async function agentLoop(messages, apiKey, model, sessionId, res, needsStudio, t
   const completedSteps = [];
   const taskEvents = [];
   const pendingSteps = Array.isArray(task?.plan) ? [...task.plan] : [];
+  
+  // Extract targets mentioned by user to enforce investigation before writing
+  const mentionedTargets = extractMentionedTargets(messages);
+  const readTargets = new Set(); // Track which mentioned targets have been read
 
   async function persistTask(patch) {
     if (!task?.taskId) return;
@@ -1329,6 +1369,25 @@ async function agentLoop(messages, apiKey, model, sessionId, res, needsStudio, t
       // Prevent marking task complete if no write tools executed despite write intent
       // and there are still pending steps (even if fuzzy matching didn't catch them)
       const hasUnresolvedWork = pendingSteps.length > 0 || (anyWriteIntent && writeToolsExecuted === 0 && toolsExecuted > 0);
+      
+      // WORKSPACE AGENT RULE: If user mentioned specific scripts/systems, enforce investigation before writing
+      // Block completion if not all mentioned targets have been read yet
+      const uninvestigatedTargets = mentionedTargets.filter(t => !readTargets.has(t));
+      const needsInvestigation = mentionedTargets.length > 0 && uninvestigatedTargets.length > 0 && writeToolsExecuted === 0;
+      
+      if (needsInvestigation && round < MAX_ROUNDS - 1) {
+        messages = [
+          ...messages,
+          { role: 'assistant', content: text },
+          {
+            role: 'user',
+            content: `SYSTEM: You have not finished investigating. The user mentioned: ${uninvestigatedTargets.join(', ')}. ` +
+              `You must read_script for each of these BEFORE making any changes. Output ONLY the next TOOL:{...} to read one of them.`,
+          },
+        ];
+        continue;
+      }
+      
       if (hasUnresolvedWork && round < MAX_ROUNDS - 1) {
         messages = [
           ...messages,
@@ -1463,6 +1522,16 @@ async function agentLoop(messages, apiKey, model, sessionId, res, needsStudio, t
     const isError = !!(toolResult && toolResult.error);
     toolsExecuted++;
     if (!isError && WRITE_TOOLS.has(toolCall.name)) writeToolsExecuted++;
+
+    // Track which mentioned targets have been read (for investigation enforcement)
+    if (!isError && toolCall.name === 'read_script' && mentionedTargets.length > 0) {
+      const path = toolCall.args?.path || '';
+      // Extract script name from path (e.g., "ServerScriptService.DeathMoneyHandler" -> "DeathMoneyHandler")
+      const scriptName = path.split('.').pop();
+      if (mentionedTargets.includes(scriptName)) {
+        readTargets.add(scriptName);
+      }
+    }
 
     // Track consecutive read-only rounds for the read-loop guard
     const READ_ONLY_TOOLS = new Set([
