@@ -531,9 +531,27 @@ function isAskingClarification(text) {
   if (!text || text.length > 500) return false; // Long responses are explanations, not questions
   if (text.includes('TOOL:')) return false;       // Tool calls are not clarifying questions
   if (text.includes('```')) return false;         // Code blocks are not questions
-  // Must end with a question mark (possibly followed by whitespace)
-  const trimmed = text.trim();
-  return trimmed.endsWith('?') || /\?\s*$/.test(trimmed);
+  
+  const lower = text.toLowerCase();
+  
+  // Explicit questions ending with ?
+  if (text.trim().endsWith('?') || /\?\s*$/.test(text.trim())) return true;
+  
+  // Implicit clarification patterns (statements that indicate need for more info)
+  const clarificationPatterns = [
+    /\bno puedo ver\b.*\bcuál\b/i,           // "no puedo ver cuál..."
+    /\bthere (are|is) (multiple|several)\b/i, // "there are multiple..."
+    /\bvarios\b.*\bscripts\b/i,               // "varios scripts..."
+    /\bwhich one\b/i,                         // "which one..."
+    /\bcuál de\b/i,                           // "cuál de..."
+    /\bpodría especificar\b/i,                // "podría especificar..."
+    /\bneed to know\b/i,                      // "need to know..."
+    /\bno estoy seguro\b/i,                   // "no estoy seguro..."
+    /\bnot sure\b/i,                          // "not sure..."
+    /\bdebería\b.*\b\?/i,                     // "debería...?"
+  ];
+  
+  return clarificationPatterns.some(re => re.test(lower));
 }
 
 // ── Diagnose WHY extractToolCall returned null ─────────────────────────────
@@ -1308,6 +1326,23 @@ async function agentLoop(messages, apiKey, model, sessionId, res, needsStudio, t
         continue;
       }
 
+      // Prevent marking task complete if no write tools executed despite write intent
+      // and there are still pending steps (even if fuzzy matching didn't catch them)
+      const hasUnresolvedWork = pendingSteps.length > 0 || (anyWriteIntent && writeToolsExecuted === 0 && toolsExecuted > 0);
+      if (hasUnresolvedWork && round < MAX_ROUNDS - 1) {
+        messages = [
+          ...messages,
+          { role: 'assistant', content: text },
+          {
+            role: 'user',
+            content: anyWriteIntent && writeToolsExecuted === 0
+              ? 'SYSTEM: You have only inspected the project so far. The developer\'s request requires creating/editing something. Output ONLY the next TOOL:{...} to start building (create_instance, create_script, update_script, etc.). Do NOT summarize or stop yet.'
+              : 'SYSTEM: There is still work remaining. Output ONLY the next TOOL:{...} to continue.',
+          },
+        ];
+        continue;
+      }
+
       // No tool enforcement possible/left, and nothing ever actually ran.
       // Do NOT report this as a completed task — that was misleading the
       // developer into thinking Studio was updated when the plugin never
@@ -1454,7 +1489,20 @@ async function agentLoop(messages, apiKey, model, sessionId, res, needsStudio, t
       const stepLabel = tlDetail ? `${tlLabel}: ${tlDetail}` : tlLabel;
       if (!isError) {
         completedSteps.push(stepLabel);
-        const pendingIndex = pendingSteps.findIndex(step => step === stepLabel || step.includes(tlLabel));
+        // Fuzzy matching: check exact match, contains, and keyword overlap
+        const pendingIndex = pendingSteps.findIndex(step => {
+          if (step === stepLabel) return true;
+          if (step.includes(tlLabel)) return true;
+          // Check if key words from the tool action match the pending step
+          const stepLower = step.toLowerCase();
+          const labelLower = stepLabel.toLowerCase();
+          // Extract main action words (nouns/verbs) from both
+          const stepWords = stepLower.match(/\b[a-z]{4,}\b/g) || [];
+          const labelWords = labelLower.match(/\b[a-z]{4,}\b/g) || [];
+          // If 2+ significant words overlap, consider it a match
+          const overlap = stepWords.filter(w => labelWords.includes(w)).length;
+          return overlap >= 2;
+        });
         if (pendingIndex >= 0) pendingSteps.splice(pendingIndex, 1);
       }
       emitWorkspaceEvent({
