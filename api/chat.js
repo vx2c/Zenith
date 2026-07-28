@@ -1112,6 +1112,7 @@ async function agentLoop(messages, apiKey, model, sessionId, res, needsStudio, t
   let toolsExecuted = 0; // how many tools have actually run this turn
   let writeToolsExecuted = 0; // how many of those were successful WRITE_TOOLS (create/update/etc.)
   let consecutiveReadRounds = 0; // read-only tools in a row without any write
+  const toolResults = []; // Track all tool results to detect errors
   const completedSteps = [];
   const taskEvents = [];
   const pendingSteps = Array.isArray(task?.plan) ? [...task.plan] : [];
@@ -1366,6 +1367,9 @@ async function agentLoop(messages, apiKey, model, sessionId, res, needsStudio, t
         continue;
       }
 
+      // Track if any tool errors occurred that need investigation
+      const hasToolErrors = toolResults.some(r => r && r.error);
+      
       // Prevent marking task complete if no write tools executed despite write intent
       // and there are still pending steps (even if fuzzy matching didn't catch them)
       const hasUnresolvedWork = pendingSteps.length > 0 || (anyWriteIntent && writeToolsExecuted === 0 && toolsExecuted > 0);
@@ -1375,14 +1379,21 @@ async function agentLoop(messages, apiKey, model, sessionId, res, needsStudio, t
       const uninvestigatedTargets = mentionedTargets.filter(t => !readTargets.has(t));
       const needsInvestigation = mentionedTargets.length > 0 && uninvestigatedTargets.length > 0 && writeToolsExecuted === 0;
       
-      if (needsInvestigation && round < MAX_ROUNDS - 1) {
+      // WORKSPACE AGENT RULE: Tool errors are information, NOT completion conditions
+      // If a tool failed (e.g., \"Not found\"), continue investigating other targets before finalizing
+      const needsErrorInvestigation = hasToolErrors && mentionedTargets.length > 0 && uninvestigatedTargets.length > 0;
+      
+      if ((needsInvestigation || needsErrorInvestigation) && round < MAX_ROUNDS - 1) {
+        const targetsToRead = needsErrorInvestigation ? uninvestigatedTargets : uninvestigatedTargets;
         messages = [
           ...messages,
           { role: 'assistant', content: text },
           {
             role: 'user',
-            content: `SYSTEM: You have not finished investigating. The user mentioned: ${uninvestigatedTargets.join(', ')}. ` +
-              `You must read_script for each of these BEFORE making any changes. Output ONLY the next TOOL:{...} to read one of them.`,
+            content: `SYSTEM: You have not finished investigating. The user mentioned: ${targetsToRead.join(', ')}. ` +
+              `A tool error occurred (e.g., \"Not found\"), but that is information to guide your search, NOT a reason to stop. ` +
+              `You must read_script for each remaining target BEFORE making any changes or finalizing. ` +
+              `Output ONLY the next TOOL:{...} to read one of them.`,
           },
         ];
         continue;
@@ -1520,6 +1531,7 @@ async function agentLoop(messages, apiKey, model, sessionId, res, needsStudio, t
     // Execute the tool
     const toolResult = await executeStudioTool(sessionId, toolCall.name, toolCall.args || {});
     const isError = !!(toolResult && toolResult.error);
+    toolResults.push(toolResult); // Track result for error detection
     toolsExecuted++;
     if (!isError && WRITE_TOOLS.has(toolCall.name)) writeToolsExecuted++;
 
