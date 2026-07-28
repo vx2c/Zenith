@@ -865,10 +865,15 @@ function buildToolEnforcementMessage(userContent, failure) {
 
 const TOOL_CALL_DIRECTIVE =
   'DIRECTIVE — TOOL SELECTION MODE:\n' +
-  'Start with a "PLAN: <one short sentence>" line saying what you\'re about to do and why — this line IS shown ' +
-  'to the developer as your reasoning, so make it specific and useful (e.g. "PLAN: Checking StarterGui for an ' +
-  'existing GUI before creating a new one."), never generic filler like "PLAN: Working on it".\n' +
-  'Then output the TOOL:{...} JSON line needed to fulfil this request.\n' +
+  'First check: does this request have MULTIPLE distinct deliverables (e.g. "a script AND a GUI", ' +
+  '"a system that does X and also Y")? \n' +
+  '  • If YES → start with a full numbered plan covering every deliverable: ' +
+  '"PLAN: 1. <deliverable one> 2. <deliverable two> ..." — this becomes your checklist. You must complete ' +
+  'every numbered item before the task is done; you may not treat item 1 alone as finishing the task.\n' +
+  '  • If NO (a single deliverable) → a one-sentence "PLAN: <what and why>" is enough.\n' +
+  'This PLAN line IS shown to the developer as your reasoning, so make it specific and useful, never generic ' +
+  'filler like "PLAN: Working on it".\n' +
+  'Then output the TOOL:{...} JSON line needed to fulfil the FIRST step of this request.\n' +
   'Do NOT write Lua code, explanations, or commentary beyond the PLAN line.\n' +
   'Do NOT call more than one tool — one TOOL:{...} per response, then stop.\n' +
   'EXCEPTION — CLARIFY FIRST: If the target is genuinely ambiguous (developer said "my script" or "the button" ' +
@@ -908,21 +913,37 @@ const EXPLANATION_DIRECTIVE =
   '  • Never claim success beyond what the TOOL_RESULT confirms.\n' +
   '  • Never reproduce the full TOOL_RESULT verbatim.';
 
-function buildCallMessages(messages, toolsExecuted, hasPendingWork) {
-  // Two phases:
-  //   0 tools executed yet  → TOOL_CALL_DIRECTIVE  (pick first tool)
-  //   tools executed        → CONTINUE_DIRECTIVE   (keep going until AI decides done)
-  //
-  // EXPLANATION_DIRECTIVE is intentionally removed — it caused the agent to
-  // stop after read tools (find_instances, read_script) even when the real
-  // write work (create_gui, create_script, etc.) had not started yet.
-  // CONTINUE_DIRECTIVE already contains an escape hatch: "Only skip TOOL:{...}
-  // and explain instead if the TOOL_RESULT reveals the task is impossible or
-  // genuinely already complete." The AI will stop when it truly is done.
+// Stronger than CONTINUE_DIRECTIVE: used when the AI itself already announced
+// specific remaining steps (via PLAN: lines) that have not been done yet.
+// CONTINUE_DIRECTIVE's "genuinely already complete" escape hatch is exactly
+// what let the agent stop after writing just ONE piece of a multi-part
+// request (e.g. the money-on-death script, but not the GUI it also promised)
+// — that escape hatch does not apply here, because the AI's own prior
+// statements are proof the task isn't done.
+function buildPendingStepsDirective(pendingSteps) {
+  const list = pendingSteps.map((s, i) => `  ${i + 1}. ${s}`).join('\n');
+  return (
+    'DIRECTIVE — UNFINISHED PLAN MODE:\n' +
+    'You previously said you would do the following, and these are NOT done yet:\n' +
+    list + '\n\n' +
+    'Do NOT write a final response. Do NOT say the task is complete. The "genuinely already complete" ' +
+    'exception does not apply — you announced this work yourself and a developer is relying on you to ' +
+    'finish it. Start with a short "PLAN: <one sentence>" line naming which of the above you\'re doing next, ' +
+    'then output the TOOL:{...} JSON line for it.'
+  );
+}
+
+function buildCallMessages(messages, toolsExecuted, pendingSteps) {
+  // Three phases:
+  //   0 tools executed yet                → TOOL_CALL_DIRECTIVE       (pick first tool)
+  //   tools executed, steps still pending  → PENDING_STEPS_DIRECTIVE   (finish what you announced — no bail-out)
+  //   tools executed, nothing pending      → CONTINUE_DIRECTIVE        (keep going until AI decides done)
   const directive =
     toolsExecuted === 0
       ? TOOL_CALL_DIRECTIVE
-      : CONTINUE_DIRECTIVE;
+      : (pendingSteps && pendingSteps.length > 0)
+        ? buildPendingStepsDirective(pendingSteps)
+        : CONTINUE_DIRECTIVE;
   // Merge the directive INTO the first system message content rather than
   // appending a new system message at the end of the conversation.
   // Most models (including gpt-oss-20b) only honour system messages at
@@ -1013,6 +1034,8 @@ async function agentLoop(messages, apiKey, model, sessionId, res, needsStudio, t
   const MAX_CONSECUTIVE_READS = 3;        // force a write after this many read-only rounds
   let headerSent = false;
   let toolEnforcementRetries = 0;
+  let pendingStepsForcedRounds = 0; // safety cap — see MAX_PENDING_STEPS_ROUNDS below
+  const MAX_PENDING_STEPS_ROUNDS = 6; // pendingStep text-matching is fuzzy; don't let a stale
   let toolsExecuted = 0; // how many tools have actually run this turn
   let writeToolsExecuted = 0; // how many of those were successful WRITE_TOOLS (create/update/etc.)
   let consecutiveReadRounds = 0; // read-only tools in a row without any write
@@ -1074,8 +1097,16 @@ async function agentLoop(messages, apiKey, model, sessionId, res, needsStudio, t
 
     // Inject the per-phase directive as the final system message so the
     // model always reads the current-phase instruction last.
-    const hasPendingWork = pendingSteps.length > 0;
-    const callMessages = buildCallMessages(messages, toolsExecuted, hasPendingWork);
+    if (pendingSteps.length > 0) {
+      if (pendingStepsForcedRounds >= MAX_PENDING_STEPS_ROUNDS) {
+        // The fuzzy label-matching likely never cleared these — trust the
+        // model's own judgment from here instead of forcing more rounds.
+        pendingSteps.length = 0;
+      } else {
+        pendingStepsForcedRounds++;
+      }
+    }
+    const callMessages = buildCallMessages(messages, toolsExecuted, pendingSteps);
     const result = await streamWithCollection(callMessages, apiKey, model);
 
     if (!result || result.error) {
@@ -1304,8 +1335,17 @@ async function agentLoop(messages, apiKey, model, sessionId, res, needsStudio, t
       const planText = safePreText.replace(/^PLAN:\s*/i, '');
       writeSSE(res, { timeline: { id: round, label: planText, status: 'plan' } });
       if (task?.taskId) {
-        task.plan = [...(task.plan || []), planText];
-        pendingSteps.push(planText);
+        // A numbered plan ("1. ... 2. ... 3. ...") lists multiple distinct
+        // deliverables — split it into separate checklist entries so each
+        // one survives independently. Previously the whole blob was pushed
+        // as ONE entry and got removed the instant the FIRST tool matched
+        // any part of it, silently dropping the rest of the checklist.
+        const numberedItems = [...planText.matchAll(/\d+\.\s*([^\d].*?)(?=\s*\d+\.|$)/gs)]
+          .map(m => m[1].trim())
+          .filter(Boolean);
+        const stepsToAdd = numberedItems.length > 1 ? numberedItems : [planText];
+        task.plan = [...(task.plan || []), ...stepsToAdd];
+        pendingSteps.push(...stepsToAdd);
         emitWorkspaceEvent({
           id: 'workspace-plan',
           type: 'plan',
