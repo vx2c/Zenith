@@ -64,6 +64,24 @@ function hasWriteIntent(text) {
   return !!text && WRITE_INTENT_PATTERNS.some(re => re.test(text));
 }
 
+// Server-side compound-deliverable detector. The PLAN: mechanism relies on
+// the model itself recognizing "this request has multiple parts" and
+// enumerating them — a small/free model can just skip that and announce a
+// single generic step instead, which is exactly what happened here: it
+// built the RemoteEvent/handler/script trio and never even acknowledged
+// the GUI was a separate promised deliverable. Detecting this from the raw
+// request text (not the model's self-report) means the checklist exists
+// even when the model doesn't bother writing one.
+const DELIVERABLE_BUCKETS = [
+  { key: 'gui',   label: 'Create the GUI/interface (screen, button, etc.) described in the request', re: /\b(gui|screengui|bot[oó]n\w*|button|interfaz|textbutton|frame)\b/i },
+  { key: 'logic', label: 'Create/wire the backend logic (script, RemoteEvent, leaderstats, etc.) described in the request', re: /\b(leaderstats|dinero|money|remoteevent|evento|script|servidor|handler|server\s*script)\b/i },
+];
+function detectCompoundDeliverables(text) {
+  if (!text) return [];
+  const matched = DELIVERABLE_BUCKETS.filter(b => b.re.test(text));
+  return matched.length >= 2 ? matched.map(b => b.label) : [];
+}
+
 // Small/free fallback models are heavily RLHF'd to disclaim real-world
 // capability ("I don't have real-time access", "I'm just an AI") and can
 // say this even when the system prompt explicitly states the opposite.
@@ -1510,6 +1528,12 @@ module.exports = async function handler(req, res) {
     } catch (error) {
       console.warn(`[chat] workspace task initialization failed: ${error.message}`);
       workspaceTask = { taskId: taskId || null, objective, plan: [] };
+    }
+    // Force-seed the checklist for compound requests (GUI + backend logic)
+    // instead of relying solely on the model to enumerate them itself.
+    const forcedDeliverables = detectCompoundDeliverables(objective);
+    if (forcedDeliverables.length > 0 && workspaceTask) {
+      workspaceTask.plan = [...(workspaceTask.plan || []), ...forcedDeliverables];
     }
 
     const openAIMessages = [
