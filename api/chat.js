@@ -402,19 +402,20 @@ function validateToolCall(toolName, args) {
   // ── Tool-specific required fields ──────────────────────────────────────
   // create_script: path must be "ParentService.ScriptName"; type is mandatory.
   if (toolName === 'create_script') {
+    const EXAMPLE = `Correct shape: TOOL:{"name":"create_script","args":{"path":"ServerScriptService.MyScript","type":"Script","source":"-- code here"}}`;
     if (!args.path || typeof args.path !== 'string' || !args.path.trim()) {
-      return '"create_script" requires a "path" in the form "ParentService.ScriptName" (e.g. "ServerScriptService.MyScript").';
+      return `"create_script" requires a "path" in the form "ParentService.ScriptName" (e.g. "ServerScriptService.MyScript"). ${EXAMPLE}`;
     }
     if (!args.path.includes('.')) {
       return (
         '"create_script" path must include the parent service: use "ParentService.ScriptName", not just "ScriptName". ' +
         'The parent container (e.g. ServerScriptService) must already exist in Studio. ' +
-        'If unsure, call get_tree first to verify.'
+        'If unsure, call get_tree first to verify. ' + EXAMPLE
       );
     }
     const VALID_SCRIPT_TYPES = new Set(['Script', 'LocalScript', 'ModuleScript']);
     if (!args.type || !VALID_SCRIPT_TYPES.has(args.type)) {
-      return '"create_script" requires "type" to be one of: Script, LocalScript, ModuleScript.';
+      return `"create_script" requires "type" to be one of: Script, LocalScript, ModuleScript. ${EXAMPLE}`;
     }
   }
 
@@ -1280,6 +1281,33 @@ async function agentLoop(messages, apiKey, model, sessionId, res, needsStudio, t
         continue;
       }
 
+      // ── Checklist still has unresolved items — do not let the model bail ──
+      // Separate from the check above: that one only fires when NOTHING was
+      // ever written. This one catches the case that slipped through in
+      // production — the model wrote something real (e.g. just the
+      // RemoteEvent) but a forced/announced checklist item (e.g. the GUI)
+      // is still outstanding. Applies regardless of writeToolsExecuted.
+      if (
+        pendingSteps.length > 0 &&
+        round < MAX_ROUNDS - 1 &&
+        pendingStepsForcedRounds < MAX_PENDING_STEPS_ROUNDS
+      ) {
+        pendingStepsForcedRounds++;
+        messages = [
+          ...messages,
+          { role: 'assistant', content: text },
+          {
+            role: 'user',
+            content:
+              'SYSTEM: These parts of the request are still NOT done:\n' +
+              pendingSteps.map((s, i) => `  ${i + 1}. ${s}`).join('\n') + '\n\n' +
+              'Do NOT stop or summarize yet. Output ONLY the next TOOL:{...} line to continue with one of the ' +
+              'items above.',
+          },
+        ];
+        continue;
+      }
+
       // No tool enforcement possible/left, and nothing ever actually ran.
       // Do NOT report this as a completed task — that was misleading the
       // developer into thinking Studio was updated when the plugin never
@@ -1464,17 +1492,21 @@ async function agentLoop(messages, apiKey, model, sessionId, res, needsStudio, t
     await persistTask({
       status: 'blocked',
       currentTool: null,
-      nextAction: 'Tool limit reached. Start a new request to continue the task.',
+      nextAction: 'Tool limit reached for this message. Send "continue" to keep going — nothing was lost.',
     });
     emitWorkspaceEvent({
       id: 'workspace-task',
       type: 'task',
       status: 'error',
-      label: 'Workspace task needs continuation',
-      error: 'Tool limit reached.',
+      label: `Workspace task paused after ${toolsExecuted} step${toolsExecuted === 1 ? '' : 's'} — reached the per-message limit`,
+      error: 'Tool call limit reached for this message.',
     });
   }
-  writeSSE(res, { error: 'Demasiadas llamadas a herramientas en una respuesta. Por favor, intenta de nuevo.' });
+  writeSSE(res, {
+    error:
+      `Reached the tool-call limit for this message (${toolsExecuted} Studio actions taken so far — that work is ` +
+      'saved). Send "continue" or "sigue" and I\'ll pick up exactly where I left off.',
+  });
   writeSSE(res, { done: true });
   res.end();
 }
