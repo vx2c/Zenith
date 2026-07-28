@@ -1014,11 +1014,8 @@ async function agentLoop(messages, apiKey, model, sessionId, res, needsStudio, t
   let headerSent = false;
   let toolEnforcementRetries = 0;
   let toolsExecuted = 0; // how many tools have actually run this turn
-<<<<<<< HEAD
   let writeToolsExecuted = 0; // how many of those were successful WRITE_TOOLS (create/update/etc.)
-=======
   let consecutiveReadRounds = 0; // read-only tools in a row without any write
->>>>>>> e3232b5 (fix: real task status, read-loop guard, workspace_event task reconnect)
   const completedSteps = [];
   const taskEvents = [];
   const pendingSteps = Array.isArray(task?.plan) ? [...task.plan] : [];
