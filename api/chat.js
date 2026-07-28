@@ -1379,21 +1379,34 @@ async function agentLoop(messages, apiKey, model, sessionId, res, needsStudio, t
       const uninvestigatedTargets = mentionedTargets.filter(t => !readTargets.has(t));
       const needsInvestigation = mentionedTargets.length > 0 && uninvestigatedTargets.length > 0 && writeToolsExecuted === 0;
       
-      // WORKSPACE AGENT RULE: Tool errors are information, NOT completion conditions
-      // If a tool failed (e.g., \"Not found\"), continue investigating other targets before finalizing
-      const needsErrorInvestigation = hasToolErrors && mentionedTargets.length > 0 && uninvestigatedTargets.length > 0;
-      
-      if ((needsInvestigation || needsErrorInvestigation) && round < MAX_ROUNDS - 1) {
-        const targetsToRead = needsErrorInvestigation ? uninvestigatedTargets : uninvestigatedTargets;
+      // CRITICAL FIX: Tool errors are INFO not completion - track failed targets persistently
+      const failedTargetsThisRound = [];
+      if (hasToolErrors) {
+        toolResults.forEach((r, idx) => {
+          if (r && r.error) {
+            const call = toolCalls[idx];
+            if (call && (call.name === 'read_script' || call.name === 'find_instances')) {
+              const target = call.args?.path || call.args?.className || 'unknown';
+              failedTargetsThisRound.push(target);
+            }
+          }
+        });
+      }
+      // NEVER finalize with unresolved errors or uninvestigated targets
+      const hasUnresolvedErrors = hasToolErrors && (mentionedTargets.length > 0 || failedTargetsThisRound.length > 0);
+      const shouldContinueInvestigating = hasUnresolvedErrors || uninvestigatedTargets.length > 0;
+      if (shouldContinueInvestigating && round < MAX_ROUNDS - 1) {
+        const nextTargets = uninvestigatedTargets.length > 0 ? uninvestigatedTargets : failedTargetsThisRound;
+        let hint = '';
+        if (hasToolErrors && uninvestigatedTargets.length === 0) {
+          hint = ' Tool failed=INFO not failure. Try: find_instances "ModuleScript", search_scripts "money/death/earn". NEVER STOP. ';
+        }
         messages = [
           ...messages,
           { role: 'assistant', content: text },
           {
             role: 'user',
-            content: `SYSTEM: You have not finished investigating. The user mentioned: ${targetsToRead.join(', ')}. ` +
-              `A tool error occurred (e.g., \"Not found\"), but that is information to guide your search, NOT a reason to stop. ` +
-              `You must read_script for each remaining target BEFORE making any changes or finalizing. ` +
-              `Output ONLY the next TOOL:{...} to read one of them.`,
+            content: `SYSTEM: INVESTIGATION INCOMPLETE. User mentioned: ${mentionedTargets.join(', ')}. ${nextTargets.length > 0 ? 'Still need: '+nextTargets.join(', ')+'. ' : ''}${hint}Continue tools BEFORE finalizing. Output ONLY TOOL:{...}.`,
           },
         ];
         continue;
