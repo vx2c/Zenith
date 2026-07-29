@@ -13,6 +13,7 @@ const { getStatus } = require('./aiService');
 
 const OPENROUTER_BASE = 'https://openrouter.ai/api/v1/chat/completions';
 const DEBUG_MODELS = [
+  'openai/gpt-5-mini',
   'openrouter/auto',
   'google/gemma-4-26b-a4b-it:free',
   'nvidia/nemotron-nano-9b-v2:free',
