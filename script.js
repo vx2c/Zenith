@@ -393,6 +393,24 @@ function showPanel(name) {
   // Update nav active states
   el('nav-home').classList.toggle('active', name === 'home');
   el('nav-settings').classList.toggle('active', name === 'settings');
+  
+  // Floating sidebar behavior: show sidebar only in chat (home), hide in settings
+  const sb = el('sidebar');
+  if (name === 'settings') {
+    // Hide sidebar when in settings panel
+    sb.classList.add('hidden-floating');
+    document.body.classList.add('sidebar-collapsed');
+    document.body.classList.remove('sidebar-visible');
+    state.collapsed = true;
+  } else if (name === 'home') {
+    // Show sidebar when in home/chat panel (if not manually collapsed)
+    if (!state.collapsed) {
+      sb.classList.remove('hidden-floating');
+      document.body.classList.remove('sidebar-collapsed');
+      document.body.classList.add('sidebar-visible');
+    }
+  }
+  
   if (name === 'settings') applyTheme(getSetting('theme', 'light'));
 }
 
@@ -870,9 +888,18 @@ function confirmRen() {
 function toggleSidebar() {
   state.collapsed = !state.collapsed;
   const sb = el('sidebar');
-  sb.classList.toggle('collapsed', state.collapsed);
-  el('main').classList.toggle('wide', state.collapsed);
-  document.body.classList.toggle('sidebar-collapsed', state.collapsed);
+  
+  if (state.collapsed) {
+    // Hide sidebar completely when collapsed (floating behavior)
+    sb.classList.add('hidden-floating');
+    document.body.classList.add('sidebar-collapsed');
+    document.body.classList.remove('sidebar-visible');
+  } else {
+    // Show sidebar when expanded
+    sb.classList.remove('hidden-floating');
+    document.body.classList.remove('sidebar-collapsed');
+    document.body.classList.add('sidebar-visible');
+  }
 }
 
 // ── Plus menu ─────────────────────────────────

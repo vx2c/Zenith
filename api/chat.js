@@ -48,6 +48,7 @@ const SUPPORTED_STUDIO_TOOLS = new Set([
   'detect_systems',
   'analyze_project',
   'summarize_project',
+  'execute_luau',
 ]);
 
 // ── Intent classifier ──────────────────────────────────────────────────────
@@ -257,6 +258,21 @@ function buildSystemPrompt(session, needsStudio) {
       '"the error") AND their message contains NO dot-path (e.g. ServerScriptService.X), quoted name, or specific ' +
       'Roblox service name, ask ONE concise clarifying question. NEVER ask for info the user already provided — ' +
       'if they gave a path or name, use find_instances/search_scripts immediately without asking.',
+    ' T16. execute_luau runs arbitrary Luau code directly and can do anything the other tools can (and more: loops, ' +
+      'math, bulk operations, reading multiple things at once). PREFER the specific tool (create_instance, ' +
+      'set_properties, create_script, etc.) whenever it fits — they are validated with clear error messages and ' +
+      'the developer can see exactly what happened in the timeline. Reserve execute_luau for things the specific ' +
+      'tools genuinely cannot express: loops over many instances, conditional logic, math, or reading multiple ' +
+      'properties/instances in one round-trip. Wrap risky operations in pcall inside the source yourself. ' +
+      'print() output does not come back in the result — call get_output_logs afterward if you need to see it.',
+    ' T17. BUG REPORT ≠ BUILD REQUEST: If the developer describes something that ALREADY EXISTS and is not ' +
+      'working ("no funciona", "doesn\'t work", "cuando lo toco no muero", "se rompió", "el botón no hace nada"), ' +
+      'this is a DEBUGGING task, not a building task. Do NOT create a new script or instance as your first move. ' +
+      'Find the SPECIFIC existing piece tied to the broken behavior — e.g. "button does nothing when clicked" → ' +
+      'find that exact button (find_instances), then read_script the LocalScript/Script INSIDE it or connected ' +
+      'to it (not an unrelated script that happens to exist elsewhere). Read it, diagnose the actual bug in the ' +
+      'code you just read, then fix it with update_script/set_properties on that SAME existing instance. Only ' +
+      'create something new if reading confirms the piece genuinely does not exist yet.',
     '',
     'Available tools:',
     '  TOOL:{"name":"ping","args":{}}',
@@ -351,6 +367,9 @@ function buildSystemPrompt(session, needsStudio) {
     '    → Returns a concise summary based on live Studio data.',
     '  TOOL:{"name":"detect_systems","args":{}}',
     '    → Detects Leaderstats, DataStores, RemoteEvents, GUIs, rounds, combat, and inventory.',
+    '  TOOL:{"name":"execute_luau","args":{"source":"local count = 0 for _, v in ipairs(workspace:GetChildren()) do count += 1 end return count"}}',
+    '    → Runs arbitrary Luau code directly in Studio and returns its return value (as a string). See T16 — ' +
+      'use the specific tools above first when they fit; this is for logic they cannot express.',
     '',
     'HALLUCINATION PREVENTION:',
     '  - You have NEVER seen this developer\'s project before unless a TOOL_RESULT shows it.',
@@ -413,6 +432,15 @@ function validateToolCall(toolName, args) {
   }
   if (toolName === 'delete_instance' && args.confirm !== true) {
     return 'delete_instance requires confirm:true and an explicit user request.';
+  }
+  if (toolName === 'execute_luau') {
+    if (!args.source || typeof args.source !== 'string' || !args.source.trim()) {
+      return '"execute_luau" requires a non-empty "source" string of Luau code. ' +
+        'Correct shape: TOOL:{"name":"execute_luau","args":{"source":"for i=1,5 do print(i) end"}}';
+    }
+    if (args.source.length > 8000) {
+      return `"execute_luau" source is too long (${args.source.length} chars, max 8000). Split into smaller calls.`;
+    }
   }
 
   for (const key of ['path', 'parent']) {
@@ -552,11 +580,28 @@ function hasPlanText(text) {
 // in the chat bubble when a tool call fails to parse.
 function sanitizeForDisplay(text) {
   if (!text) return text;
-  return text
+  const withoutToolLines = text
     .split('\n')
     .filter(line => !line.trimStart().startsWith('TOOL:'))
     .join('\n')
     .trim();
+
+  // Defense in depth: if what's LEFT (or the original text) is itself a bare
+  // JSON object shaped like a tool call attempt, never show that to the
+  // user as if it were a real answer — replace it with an honest note.
+  // This matters because the retry that would normally catch a malformed
+  // tool call is gated on `needsStudio`, which isn't always true for the
+  // specific round that produces this text.
+  const candidate = withoutToolLines || text.trim();
+  if (candidate.startsWith('{') && candidate.endsWith('}')) {
+    try {
+      const parsed = JSON.parse(candidate);
+      if (parsed && typeof parsed === 'object' && (parsed.tool || parsed.name) && parsed.args !== undefined) {
+        return "I tried to run a Studio command but formatted it incorrectly, so nothing executed. Could you try that again?";
+      }
+    } catch { /* not JSON, or not shaped like a tool call — show as-is */ }
+  }
+  return withoutToolLines;
 }
 
 // ── Detect clarifying questions ────────────────────────────────────────────
@@ -601,7 +646,33 @@ function isAskingClarification(text) {
 function describeToolCallFailure(text) {
   const prefix = 'TOOL:';
   const idx = text.indexOf(prefix);
-  if (idx === -1) return { attempted: false };
+  if (idx === -1) {
+    // No "TOOL:" prefix at all — but check if the response is essentially a
+    // bare JSON object shaped like a tool call attempt (has "tool"/"name"
+    // and "args" keys). Small/free models sometimes drop the required
+    // prefix entirely; without this check that raw JSON leaks straight to
+    // the user as if it were a normal answer instead of being retried.
+    const trimmed = text.trim();
+    if (trimmed.startsWith('{') && trimmed.endsWith('}')) {
+      try {
+        const parsed = JSON.parse(trimmed);
+        if (parsed && typeof parsed === 'object' && (parsed.tool || parsed.name) && parsed.args !== undefined) {
+          const wrongKey = parsed.tool && !parsed.name;
+          return {
+            attempted: true,
+            reason: 'malformed',
+            detail: wrongKey
+              ? `You wrote a bare JSON object using "tool" as the key name and no "TOOL:" prefix. ` +
+                `The correct format is: TOOL:{"name":"${parsed.tool}","args":${JSON.stringify(parsed.args)}} ` +
+                `— the prefix "TOOL:" is required, and the key must be "name", not "tool".`
+              : `You wrote a bare JSON object with no "TOOL:" prefix. The correct format is: ` +
+                `TOOL:${trimmed} — the prefix is required, nothing else on that line.`,
+          };
+        }
+      } catch { /* not valid JSON either — fall through to attempted:false */ }
+    }
+    return { attempted: false };
+  }
 
   let start = idx + prefix.length;
   while (start < text.length && /\s/.test(text[start])) start++;
@@ -836,6 +907,7 @@ const WRITE_TOOLS = new Set([
   'create_remote_event', 'create_remote_function', 'create_folder',
   'rename_instance', 'move_instance', 'clone_instance', 'delete_instance',
   'set_properties', 'set_attributes', 'save_place', 'clear_output',
+  'execute_luau',
 ]);
 
 // ── Build TOOL_RESULT injection message ───────────────────────────────────
@@ -1066,6 +1138,7 @@ const TOOL_LABELS_MAP = {
   analyze_project:        'Analyzing project',
   summarize_project:      'Summarizing project',
   detect_systems:         'Detecting systems',
+  execute_luau:           'Running Luau code',
 };
 
 function toolLabelFor(name) {
@@ -1095,6 +1168,10 @@ function toolDetailFor(name, args) {
       return path ? last(path) : 'Explorer';
     case 'find_instances': case 'search_scripts':
       return query ? `"${query}"` : undefined;
+    case 'execute_luau': {
+      const src = typeof args.source === 'string' ? args.source.trim().replace(/\s+/g, ' ') : '';
+      return src ? (src.length > 48 ? src.slice(0, 48) + '…' : src) : undefined;
+    }
     default:
       return undefined;
   }
@@ -1112,6 +1189,7 @@ async function agentLoop(messages, apiKey, model, sessionId, res, needsStudio, t
   let toolsExecuted = 0; // how many tools have actually run this turn
   let writeToolsExecuted = 0; // how many of those were successful WRITE_TOOLS (create/update/etc.)
   let consecutiveReadRounds = 0; // read-only tools in a row without any write
+  const toolResults = []; // Track all tool results to detect errors
   const completedSteps = [];
   const taskEvents = [];
   const pendingSteps = Array.isArray(task?.plan) ? [...task.plan] : [];
@@ -1366,6 +1444,9 @@ async function agentLoop(messages, apiKey, model, sessionId, res, needsStudio, t
         continue;
       }
 
+      // Track if any tool errors occurred that need investigation
+      const hasToolErrors = toolResults.some(r => r && r.error);
+      
       // Prevent marking task complete if no write tools executed despite write intent
       // and there are still pending steps (even if fuzzy matching didn't catch them)
       const hasUnresolvedWork = pendingSteps.length > 0 || (anyWriteIntent && writeToolsExecuted === 0 && toolsExecuted > 0);
@@ -1375,14 +1456,21 @@ async function agentLoop(messages, apiKey, model, sessionId, res, needsStudio, t
       const uninvestigatedTargets = mentionedTargets.filter(t => !readTargets.has(t));
       const needsInvestigation = mentionedTargets.length > 0 && uninvestigatedTargets.length > 0 && writeToolsExecuted === 0;
       
-      if (needsInvestigation && round < MAX_ROUNDS - 1) {
+      // WORKSPACE AGENT RULE: Tool errors are information, NOT completion conditions
+      // If a tool failed (e.g., \"Not found\"), continue investigating other targets before finalizing
+      const needsErrorInvestigation = hasToolErrors && mentionedTargets.length > 0 && uninvestigatedTargets.length > 0;
+      
+      if ((needsInvestigation || needsErrorInvestigation) && round < MAX_ROUNDS - 1) {
+        const targetsToRead = needsErrorInvestigation ? uninvestigatedTargets : uninvestigatedTargets;
         messages = [
           ...messages,
           { role: 'assistant', content: text },
           {
             role: 'user',
-            content: `SYSTEM: You have not finished investigating. The user mentioned: ${uninvestigatedTargets.join(', ')}. ` +
-              `You must read_script for each of these BEFORE making any changes. Output ONLY the next TOOL:{...} to read one of them.`,
+            content: `SYSTEM: You have not finished investigating. The user mentioned: ${targetsToRead.join(', ')}. ` +
+              `A tool error occurred (e.g., \"Not found\"), but that is information to guide your search, NOT a reason to stop. ` +
+              `You must read_script for each remaining target BEFORE making any changes or finalizing. ` +
+              `Output ONLY the next TOOL:{...} to read one of them.`,
           },
         ];
         continue;
@@ -1520,6 +1608,7 @@ async function agentLoop(messages, apiKey, model, sessionId, res, needsStudio, t
     // Execute the tool
     const toolResult = await executeStudioTool(sessionId, toolCall.name, toolCall.args || {});
     const isError = !!(toolResult && toolResult.error);
+    toolResults.push(toolResult); // Track result for error detection
     toolsExecuted++;
     if (!isError && WRITE_TOOLS.has(toolCall.name)) writeToolsExecuted++;
 
@@ -1706,7 +1795,10 @@ module.exports = async function handler(req, res) {
         'You help developers write Lua scripts, debug code, generate GUIs, ' +
         'analyze Explorer hierarchies, and automate workflows inside Roblox Studio. ' +
         'No Studio plugin is connected right now, so you can only give advice and code. ' +
-        'Do not output TOOL: lines or claim that you changed the project.',
+        'Do NOT output "TOOL:" lines. Do NOT output bare JSON objects that look like a tool call ' +
+        '(e.g. {"name":"...","args":{...}} or {"tool":"...","args":{...}}) — you have no working tools in ' +
+        'this conversation, full stop. If code is needed, share it as a normal Lua code block for the ' +
+        'developer to paste in manually. Never claim you changed the project.',
     },
     ...messages.map(m => ({
       role:    m.role === 'ai' ? 'assistant' : 'user',
