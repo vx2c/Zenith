@@ -229,32 +229,39 @@
 
       <!-- Input -->
       <div class="input-area">
-        <!-- Plus menu -->
-        <div class="plus-menu-wrap">
-          <button id="btn-plus" class="btn-plus" title="Options">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-          </button>
-          <div id="plus-menu" class="plus-menu hidden">
-            <button class="plus-item" id="plus-thinking">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 8v4l3 3"/></svg>
-              <span>Thinking</span>
-              <span class="plus-check hidden" id="check-thinking">✓</span>
-            </button>
-            <button class="plus-item" id="plus-search">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-              <span>Search Internet</span>
-              <span class="plus-check hidden" id="check-search">✓</span>
-            </button>
+        <!-- Animated Border Container -->
+        <div class="animated-input-wrapper">
+          <div class="animated-border"></div>
+          
+          <div class="input-content">
+            <!-- Plus menu -->
+            <div class="plus-menu-wrap">
+              <button id="btn-plus" class="btn-plus" title="Options">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+              </button>
+              <div id="plus-menu" class="plus-menu hidden">
+                <button class="plus-item" id="plus-thinking">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 8v4l3 3"/></svg>
+                  <span>Thinking</span>
+                  <span class="plus-check hidden" id="check-thinking">✓</span>
+                </button>
+                <button class="plus-item" id="plus-search">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                  <span>Search Internet</span>
+                  <span class="plus-check hidden" id="check-search">✓</span>
+                </button>
+              </div>
+            </div>
+            <!-- Mode chips -->
+            <div id="mode-chips" class="mode-chips"></div>
+            <textarea id="chat-input" rows="1" placeholder="Describe what you want to build, or ask a scripting question…" style="width:100%;resize:none;border:none;outline:none;background:transparent;color:inherit;font:inherit;padding:16px 0;line-height:1.6;"></textarea>
+            <div class="input-btns" style="display:flex;align-items:center;gap:4px;">
+              <button id="btn-send" class="btn-send" title="Send">
+                <svg id="send-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+                <svg id="stop-icon" width="14" height="14" viewBox="0 0 24 24" fill="currentColor" style="display:none;"><rect x="4" y="4" width="16" height="16" rx="2"/></svg>
+              </button>
+            </div>
           </div>
-        </div>
-        <!-- Mode chips -->
-        <div id="mode-chips" class="mode-chips"></div>
-        <textarea id="chat-input" rows="1" placeholder="Describe what you want to build, or ask a scripting question…" style="width:100%;resize:none;border:none;outline:none;background:transparent;color:inherit;font:inherit;padding:16px 0;line-height:1.6;"></textarea>
-        <div class="input-btns" style="display:flex;align-items:center;gap:4px;">
-          <button id="btn-send" class="btn-send" title="Send">
-            <svg id="send-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
-            <svg id="stop-icon" width="14" height="14" viewBox="0 0 24 24" fill="currentColor" style="display:none;"><rect x="4" y="4" width="16" height="16" rx="2"/></svg>
-          </button>
         </div>
         <p class="input-note">xZenith may make mistakes. Verify important scripts before using them in production.</p>
       </div><!-- /.input-area -->
