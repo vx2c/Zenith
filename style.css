@@ -1131,47 +1131,51 @@ html.dark .z-card-badge--error     { background: rgba(248,113,113,0.15); color: 
   gap: 8px;
 }
 
-/* Animated Border Input Wrapper */
+/* Animated Border Input Wrapper - Elegant Design */
 .animated-input-wrapper {
   position: relative;
-  border-radius: 14px;
+  border-radius: 16px;
   background: #0a0a0a;
   overflow: hidden;
-  padding: 2px;
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+  padding: 1px;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.4);
+  max-width: 720px;
+  margin: 0 auto;
 }
 
 /* Glowing border animation - moving line around perimeter */
 .animated-border {
   position: absolute;
   inset: 0;
-  border-radius: 14px;
-  padding: 2px;
+  border-radius: 16px;
+  padding: 1px;
   background: linear-gradient(90deg, #3b82f6, #8b5cf6, #6366f1, #3b82f6);
-  background-size: 400% 400%;
+  background-size: 300% 300%;
   -webkit-mask: 
     linear-gradient(#fff 0 0) content-box, 
     linear-gradient(#fff 0 0);
   -webkit-mask-composite: xor;
   mask-composite: exclude;
-  animation: border-trail 4s linear infinite;
+  animation: border-trail 3s ease-in-out infinite;
   pointer-events: none;
-  opacity: 0.8;
+  opacity: 0.7;
 }
 
 @keyframes border-trail {
   0% { background-position: 0% 50%; }
-  100% { background-position: 400% 50%; }
+  50% { background-position: 100% 50%; }
+  100% { background-position: 0% 50%; }
 }
 
 /* Input content inside wrapper */
 .input-content {
   position: relative;
   background: #0a0a0a;
-  border-radius: 12px;
+  border-radius: 15px;
   display: flex;
   flex-direction: column;
-  min-height: 60px;
+  min-height: 56px;
+  padding: 8px 12px;
 }
 
 /* Chat Input: Clean inside wrapper */
