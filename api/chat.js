@@ -1253,6 +1253,8 @@ async function agentLoop(messages, apiKey, model, sessionId, res, needsStudio, t
   let readScriptExecuted = false; // has at least one read_script succeeded this task?
   let readBeforeCreateGateUses = 0; // safety cap for the gate below
   let generalErrorGateUses = 0; // safety cap for the last-action-was-error gate
+  let selfEvalAttempted = false; // Layer 3 — only ONE self-eval attempt per task (user requirement)
+  let awaitingSelfEval = false; // true right after asking for the [x]/[ ] checklist, until the next round
   let consecutiveReadRounds = 0; // read-only tools in a row without any write
   const toolResults = []; // Track all tool results to detect errors
   const completedSteps = [];
@@ -1339,6 +1341,45 @@ async function agentLoop(messages, apiKey, model, sessionId, res, needsStudio, t
     }
 
     const { text, model: usedModel } = result;
+
+    // ── Layer 3: handle the response to a self-evaluation checklist ────────
+    // If the previous round asked the model to confirm [x]/[ ] status for
+    // each pending item, THIS round's text is that checklist, not a normal
+    // tool call or explanation. Handle it here, before normal extraction.
+    if (awaitingSelfEval) {
+      awaitingSelfEval = false; // consumed regardless of outcome — one attempt only
+      const checklistLines = [...text.matchAll(/\[( |x|X)\]\s*(.+)/g)];
+      if (checklistLines.length === 0) {
+        // SOFT PASS: model ignored the checklist format entirely. Per the
+        // agreed design, do NOT retry the self-eval and do NOT block —
+        // let this response flow through the normal path below exactly as
+        // if no self-eval had been requested. The existing (coarser)
+        // pendingSteps gate still applies as a fallback since pendingSteps
+        // is untouched here.
+      } else {
+        const stillPending = checklistLines.filter(m => m[1].trim().toLowerCase() !== 'x');
+        if (stillPending.length === 0) {
+          // Model explicitly confirms everything is done. This is more
+          // trustworthy than our fuzzy label-matching, so it wins — clear
+          // pendingSteps and let the normal !toolCall completion logic
+          // below (which already exists and is already correct) accept it.
+          pendingSteps.length = 0;
+        } else {
+          messages = [
+            ...messages,
+            { role: 'assistant', content: text },
+            {
+              role: 'user',
+              content:
+                'SYSTEM: You confirmed these are still NOT done:\n' +
+                stillPending.map((m, i) => `  ${i + 1}. ${m[2].trim()}`).join('\n') + '\n\n' +
+                'Continue now — output ONLY the next TOOL:{...} for the first one on that list.',
+            },
+          ];
+          continue;
+        }
+      }
+    }
 
     // Check if AI wants to call a tool
     const toolCall = extractToolCall(text);
@@ -1477,6 +1518,37 @@ async function agentLoop(messages, apiKey, model, sessionId, res, needsStudio, t
               'anything yet. The developer\'s request requires creating/editing something. Do NOT summarize or ' +
               'stop here. Using what you just learned from the tree/search, output the next TOOL:{...} to start ' +
               'building (e.g. create_instance, create_script). Output ONLY that line.',
+          },
+        ];
+        continue;
+      }
+
+      // ── Layer 3: explicit self-evaluation for substantial checklists ───────
+      // For pendingSteps >= 3, don't just blindly nudge "keep going" — ask
+      // the model to confirm status per item first. This is authoritative
+      // (the model knows what it actually did) instead of us fuzzy-matching
+      // tool labels against plan text, which is unreliable. Exactly ONE
+      // attempt per task (user requirement #2) — if the model ignores the
+      // checklist format next round, that's a soft pass (see awaitingSelfEval
+      // handling above), not a retry loop.
+      if (
+        pendingSteps.length >= 3 &&
+        !selfEvalAttempted &&
+        round < MAX_ROUNDS - 1
+      ) {
+        selfEvalAttempted = true;
+        awaitingSelfEval = true;
+        messages = [
+          ...messages,
+          { role: 'assistant', content: text },
+          {
+            role: 'user',
+            content:
+              'SYSTEM: Before finishing, confirm the real status of everything from your plan. Reply with ' +
+              'EXACTLY this checklist, one line per item below, marking each [x] (verified done) or [ ] (not ' +
+              'done) based on what you actually did — not what you assume:\n\n' +
+              pendingSteps.map(s => `[ ] ${s}`).join('\n') + '\n\n' +
+              'Output ONLY the checklist, nothing else.',
           },
         ];
         continue;
