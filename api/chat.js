@@ -995,13 +995,21 @@ function buildToolResultMessage(toolName, toolResult, isError) {
   const { text: resultJson, wasTruncated } = truncateResultForModel(toolName, rawJson);
 
   if (isError) {
+    const isNotFound = /not found/i.test(toolResult?.error || '');
     return (
       `TOOL_RESULT [${toolName}] — FAILED\n` +
       `${resultJson}\n\n` +
       `RESPONSE RULES:\n` +
       `  - Explain the error in plain language (1–2 sentences).\n` +
       `  - Do NOT show Lua code or JSON data.\n` +
-      `  - If recoverable (wrong path, etc.), output a TOOL:{...} fix immediately.\n` +
+      (isNotFound
+        ? `  - This looks like a wrong/guessed path. Do NOT retry the same path. Recover by: (1) find_instances ` +
+          `with a broader query to locate the correct path, or (2) search_scripts if it's a script you're ` +
+          `looking for, or (3) get_tree on a parent service to see what actually exists there. Output ONE of ` +
+          `these as your next TOOL:{...} immediately.\n`
+        : `  - If recoverable (wrong path, wrong args, etc.), output a TOOL:{...} fix immediately.\n`) +
+      `  - If you've already tried 2+ different recovery approaches and still failed, ask the developer a ` +
+      `specific clarifying question instead of retrying the same thing again.\n` +
       `  - Never claim the action succeeded.`
     );
   }
@@ -1244,6 +1252,7 @@ async function agentLoop(messages, apiKey, model, sessionId, res, needsStudio, t
   let writeToolsExecuted = 0; // how many of those were successful WRITE_TOOLS (create/update/etc.)
   let readScriptExecuted = false; // has at least one read_script succeeded this task?
   let readBeforeCreateGateUses = 0; // safety cap for the gate below
+  let generalErrorGateUses = 0; // safety cap for the last-action-was-error gate
   let consecutiveReadRounds = 0; // read-only tools in a row without any write
   const toolResults = []; // Track all tool results to detect errors
   const completedSteps = [];
@@ -1541,6 +1550,36 @@ async function agentLoop(messages, apiKey, model, sessionId, res, needsStudio, t
             content: anyWriteIntent && writeToolsExecuted === 0
               ? 'SYSTEM: You have only inspected the project so far. The developer\'s request requires creating/editing something. Output ONLY the next TOOL:{...} to start building (create_instance, create_script, update_script, etc.). Do NOT summarize or stop yet.'
               : 'SYSTEM: There is still work remaining. Output ONLY the next TOOL:{...} to continue.',
+          },
+        ];
+        continue;
+      }
+
+      // ── General-purpose error gate (not dependent on named targets) ────────
+      // needsErrorInvestigation above only fires when the user named a
+      // specific script. Pure investigation requests with no named target
+      // and no write verb ("investiga por qué mi DataStore no guarda",
+      // "encuentra la causa de un memory leak") matched NONE of the existing
+      // retry conditions, so a task that errored on its last action and then
+      // got no further tool call fell straight through to 'completed' —
+      // exactly the "tool failed → no tool call → workspace completed" gap.
+      // Checking only the LAST result (not "any error ever") is deliberate:
+      // a task that hit an error early and then genuinely recovered via a
+      // different approach should NOT be blocked here.
+      const lastResult = toolResults.length > 0 ? toolResults[toolResults.length - 1] : null;
+      const lastActionWasError = !!(lastResult && lastResult.error);
+      if (lastActionWasError && round < MAX_ROUNDS - 1 && generalErrorGateUses < 2) {
+        generalErrorGateUses++;
+        messages = [
+          ...messages,
+          { role: 'assistant', content: text },
+          {
+            role: 'user',
+            content:
+              'SYSTEM: The last tool call you ran failed, and you have not tried anything since. Do not stop here ' +
+              'silently. Either: (a) try a different tool/path/approach to work around it, or (b) if you\'re ' +
+              'genuinely stuck, output ONE clarifying question ending in "?" explaining what you tried and what ' +
+              'you need from the developer to continue — do not just summarize as if the task were finished.',
           },
         ];
         continue;
