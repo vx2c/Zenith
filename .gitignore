@@ -1,8 +1,11 @@
+```gitignore
 # Compiled and build artifacts
 *.pyc
 __pycache__/
 *.o
 *.obj
+dist/
+build/
 *.class
 *.exe
 *.dll
@@ -14,18 +17,21 @@ __pycache__/
 .venv/
 venv/
 node_modules/
-dist/
-build/
 target/
 .gradle/
 .mypy_cache/
 .pytest_cache/
+julia-*/
+zig*/
 
 # Logs and temp files
 *.log
 *.tmp
 *.swp
 *.swo
+*.bak
+*.~
+*~
 
 # Environment
 .env
@@ -35,10 +41,19 @@ target/
 # Editors
 .vscode/
 .idea/
+*.swp
+*.swo
 
-# System files
+# System
 .DS_Store
 Thumbs.db
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Icon?
+VolumeIcon.icns
 
 # Coverage
 coverage/
@@ -68,3 +83,4 @@ htmlcov/
 *.tar.bz2
 *.tar.xz
 *.tar.zst
+```
