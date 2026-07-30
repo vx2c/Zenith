@@ -249,7 +249,11 @@
         </div>
         <!-- Mode chips -->
         <div id="mode-chips" class="mode-chips"></div>
-        <textarea id="chat-input" rows="1" placeholder="Describe what you want to build, or ask a scripting question…" style="width:100%;resize:none;border:none;outline:none;background:transparent;color:inherit;font:inherit;padding:16px 0;line-height:1.6;"></textarea>
+        <!-- Animated Border Input Wrapper -->
+        <div class="input-wrapper-animated">
+          <div class="input-border-glow"></div>
+          <textarea id="chat-input" rows="1" placeholder="Describe what you want to build, or ask a scripting question…" class="chat-input-clean"></textarea>
+        </div>
         <div class="input-btns" style="display:flex;align-items:center;gap:4px;">
           <button id="btn-send" class="btn-send" title="Send">
             <svg id="send-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>

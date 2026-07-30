@@ -1131,7 +1131,40 @@ html.dark .z-card-badge--error     { background: rgba(248,113,113,0.15); color: 
   gap: 8px;
 }
 
-/* Chat Input: Completely clean without any box */
+/* Animated Border Input Wrapper */
+.input-wrapper-animated {
+  position: relative;
+  border-radius: 12px;
+  background: #0a0a0a;
+  overflow: hidden;
+  padding: 2px;
+}
+
+/* Glowing border animation */
+.input-border-glow {
+  position: absolute;
+  inset: 0;
+  border-radius: 12px;
+  padding: 2px;
+  background: linear-gradient(90deg, #3b82f6, #8b5cf6, #3b82f6);
+  background-size: 300% 300%;
+  -webkit-mask: 
+    linear-gradient(#fff 0 0) content-box, 
+    linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  animation: border-flow 3s ease-in-out infinite;
+  pointer-events: none;
+}
+
+@keyframes border-flow {
+  0% { background-position: 0% 50%; }
+  50% { background-position: 100% 50%; }
+  100% { background-position: 0% 50%; }
+}
+
+/* Chat Input: Clean inside wrapper */
+.chat-input-clean,
 #chat-input {
   flex: 1;
   resize: none;
@@ -1144,11 +1177,15 @@ html.dark .z-card-badge--error     { background: rgba(248,113,113,0.15); color: 
   line-height: 1.6;
   max-height: 200px;
   overflow-y: auto;
-  padding: 12px 0;
+  padding: 12px 14px;
   width: 100%;
+  display: block;
 }
+.chat-input-clean::placeholder,
 #chat-input::placeholder { color: #666; }
+html:not(.dark) .chat-input-clean,
 html:not(.dark) #chat-input { color: #111; }
+html:not(.dark) .chat-input-clean::placeholder,
 html:not(.dark) #chat-input::placeholder { color: #9ca3af; }
 
 .input-btns { 
