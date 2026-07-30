@@ -900,13 +900,13 @@ function toggleSidebar() {
   const sb = el('sidebar');
   
   if (state.collapsed) {
-    // Hide sidebar completely when collapsed (floating behavior)
-    sb.classList.add('hidden-floating');
+    // Collapse sidebar to icons only
+    sb.classList.add('collapsed');
     document.body.classList.add('sidebar-collapsed');
     document.body.classList.remove('sidebar-visible');
   } else {
-    // Show sidebar when expanded
-    sb.classList.remove('hidden-floating');
+    // Expand sidebar
+    sb.classList.remove('collapsed');
     document.body.classList.remove('sidebar-collapsed');
     document.body.classList.add('sidebar-visible');
   }

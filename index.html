@@ -253,18 +253,12 @@
         </div>
         <!-- Mode chips -->
         <div id="mode-chips" class="mode-chips"></div>
-        <div class="input-glow-wrap">
-          <div class="input-glow-inner">
-            <div class="input-wrap">
-              <textarea id="chat-input" rows="1" placeholder="Describe what you want to build, or ask a scripting question…"></textarea>
-              <div class="input-btns">
-                <button id="btn-send" class="btn-send" title="Send">
-                  <svg id="send-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
-                  <svg id="stop-icon" width="14" height="14" viewBox="0 0 24 24" fill="currentColor" style="display:none;"><rect x="4" y="4" width="16" height="16" rx="2"/></svg>
-                </button>
-              </div>
-            </div>
-          </div>
+        <textarea id="chat-input" rows="1" placeholder="Describe what you want to build, or ask a scripting question…" style="width:100%;resize:none;border:none;outline:none;background:transparent;color:inherit;font:inherit;padding:16px 0;line-height:1.6;"></textarea>
+        <div class="input-btns" style="display:flex;align-items:center;gap:4px;">
+          <button id="btn-send" class="btn-send" title="Send">
+            <svg id="send-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+            <svg id="stop-icon" width="14" height="14" viewBox="0 0 24 24" fill="currentColor" style="display:none;"><rect x="4" y="4" width="16" height="16" rx="2"/></svg>
+          </button>
         </div>
         <p class="input-note">xZenith may make mistakes. Verify important scripts before using them in production.</p>
       </div><!-- /.input-area -->
