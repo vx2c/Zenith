@@ -6,9 +6,31 @@
 html, body { margin: 0; height: 100%; font-family: Inter, system-ui, -apple-system, sans-serif; }
 
 body {
-  background: #f4f4f5;
+  background: #050507;
   color: #111;
   -webkit-font-smoothing: antialiased;
+  position: relative;
+  overflow: hidden;
+}
+
+/* Wave animation background */
+body::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: 
+    radial-gradient(circle at 20% 80%, rgba(99, 102, 241, 0.08) 0%, transparent 50%),
+    radial-gradient(circle at 80% 20%, rgba(168, 85, 247, 0.06) 0%, transparent 50%),
+    radial-gradient(circle at 40% 40%, rgba(59, 130, 246, 0.05) 0%, transparent 40%);
+  z-index: 0;
+  animation: waveShift 20s ease-in-out infinite;
+  pointer-events: none;
+}
+
+@keyframes waveShift {
+  0%, 100% { transform: translate(0, 0) scale(1); }
+  33% { transform: translate(-30px, -20px) scale(1.05); }
+  66% { transform: translate(20px, 30px) scale(0.98); }
 }
 
 /* ── Dark Mode ─────────────────────────── */
@@ -467,59 +489,88 @@ html.dark .btn-enter:hover {
   overflow: hidden;
   padding: 20px;
   gap: 20px;
-  background: #e8e8ea;
+  background: transparent;
+  position: relative;
+  z-index: 1;
 }
 html.dark .app-shell {
-  background: #0d0d0f;
+  background: transparent;
 }
 
 /* ── Sidebar: Floating Panel ──────────── */
 .sidebar {
   width: 260px;
   flex-shrink: 0;
-  background: #ffffff;
+  background: #121214;
   border-radius: 24px;
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  transition: width 0.3s cubic-bezier(0.4,0,0.2,1), opacity 0.25s ease, transform 0.25s ease;
-  box-shadow: 0 8px 32px rgba(0,0,0,0.08), 0 0 0 1px rgba(0,0,0,0.04);
-  border: 1px solid rgba(0,0,0,0.06);
+  transition: width 0.3s cubic-bezier(0.4,0,0.2,1);
+  box-shadow: 0 8px 32px rgba(0,0,0,0.4), 0 0 0 1px rgba(255,255,255,0.06);
+  border: 1px solid rgba(255,255,255,0.08);
 }
-html.dark .sidebar {
-  background: #1e1e1f;
-  box-shadow: 0 8px 32px rgba(0,0,0,0.3), 0 0 0 1px rgba(255,255,255,0.06);
-  border: 1px solid rgba(255,255,255,0.06);
+html:not(.dark) .sidebar {
+  background: #ffffff;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.12), 0 0 0 1px rgba(0,0,0,0.06);
+  border: 1px solid rgba(0,0,0,0.08);
 }
 
-/* Hidden floating state - completely hide sidebar */
-.sidebar.hidden-floating {
-  width: 0;
+/* Collapsed state - show only icons */
+.sidebar.collapsed {
+  width: 70px;
+}
+.sidebar.collapsed .sidebar-text,
+.sidebar.collapsed .brand-name,
+.sidebar.collapsed .section-label,
+.sidebar.collapsed #btn-new-chat span,
+.sidebar.collapsed .user-dn,
+.sidebar.collapsed .user-un {
   opacity: 0;
-  transform: translateX(-20px);
   pointer-events: none;
-  padding: 0;
-  margin: 0;
+  width: 0;
+  white-space: nowrap;
   overflow: hidden;
 }
+.sidebar.collapsed .sidebar-brand {
+  justify-content: center;
+  padding-left: 0;
+}
+.sidebar.collapsed #btn-new-chat {
+  justify-content: center;
+  padding: 12px;
+}
+.sidebar.collapsed .nav-item {
+  justify-content: center;
+  padding: 12px;
+}
+.sidebar.collapsed .sidebar-user {
+  justify-content: center;
+  padding: 16px 0;
+}
 
-/* Collapsed: icons only */
-.sidebar.collapsed { width: 60px; }
-.sidebar.collapsed .sidebar-text { display: none !important; }
-.sidebar.collapsed .sidebar-brand { justify-content: center; }
-.sidebar.collapsed .sidebar-header { justify-content: center; padding: 16px 0 12px; }
-.sidebar.collapsed .btn-new-chat { justify-content: center; padding: 10px; }
-.sidebar.collapsed .nav-item { justify-content: center; padding: 10px; }
-.sidebar.collapsed .sidebar-user { justify-content: center; }
-.sidebar.collapsed .user-meta { display: none; }
-.sidebar.collapsed .btn-logout { display: none; }
-.sidebar.collapsed .ai-status-card .ai-status-meta,
-.sidebar.collapsed .ai-status-card .ai-fallback-row { display: none; }
-.sidebar.collapsed .section-label { text-align: center; padding: 8px 0 4px; font-size: 0.55rem; }
-
-/* Expand button visible when collapsed — show on left edge */
-.sidebar.collapsed #btn-collapse {
+/* Main area */
+.main-area {
+  flex: 1;
+  background: #121214;
+  border-radius: 24px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.4), 0 0 0 1px rgba(255,255,255,0.06);
+  border: 1px solid rgba(255,255,255,0.08);
   position: relative;
+  z-index: 1;
+}
+html:not(.dark) .main-area {
+  background: #ffffff;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.12), 0 0 0 1px rgba(0,0,0,0.06);
+  border: 1px solid rgba(0,0,0,0.08);
+}
+
+/* Sidebar collapsed - main area expands */
+body.sidebar-collapsed .main-area {
+  margin-left: 0;
 }
 
 /* Floating reopen button shown when sidebar is fully collapsed */
