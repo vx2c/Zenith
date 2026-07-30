@@ -385,24 +385,36 @@ async function loadAvatar() {
   } catch { /* non-fatal */ }
 }
 
+// ── Modal functions ────────────────────────────
+function openModal(modalId) {
+  const modal = el(modalId);
+  if (modal) {
+    modal.classList.remove('hidden');
+    // Focus first input if exists
+    const firstInput = modal.querySelector('input, button');
+    if (firstInput) firstInput.focus();
+  }
+}
+
+function closeModal(modalId) {
+  const modal = el(modalId);
+  if (modal) {
+    modal.classList.add('hidden');
+  }
+}
+
 // ── Panel switching ────────────────────────────
 function showPanel(name) {
   state.activePanel = name;
   el('panel-home').classList.toggle('hidden', name !== 'home');
-  el('panel-settings').classList.toggle('hidden', name !== 'settings');
+  // Settings is now a modal, not a panel
   // Update nav active states
   el('nav-home').classList.toggle('active', name === 'home');
   el('nav-settings').classList.toggle('active', name === 'settings');
   
-  // Floating sidebar behavior: show sidebar only in chat (home), hide in settings
+  // Floating sidebar behavior: show sidebar only in chat (home)
   const sb = el('sidebar');
-  if (name === 'settings') {
-    // Hide sidebar when in settings panel
-    sb.classList.add('hidden-floating');
-    document.body.classList.add('sidebar-collapsed');
-    document.body.classList.remove('sidebar-visible');
-    state.collapsed = true;
-  } else if (name === 'home') {
+  if (name === 'home') {
     // Show sidebar when in home/chat panel (if not manually collapsed)
     if (!state.collapsed) {
       sb.classList.remove('hidden-floating');
@@ -410,8 +422,6 @@ function showPanel(name) {
       document.body.classList.add('sidebar-visible');
     }
   }
-  
-  if (name === 'settings') applyTheme(getSetting('theme', 'light'));
 }
 
 // ── Chat CRUD ─────────────────────────────────
@@ -1063,10 +1073,12 @@ function wire() {
   el('btn-collapse').addEventListener('click', toggleSidebar);
   el('btn-sidebar-reopen')?.addEventListener('click', toggleSidebar);
   el('nav-home').addEventListener('click', () => showPanel('home'));
-  el('nav-settings').addEventListener('click', () => showPanel('settings'));
+  el('nav-settings').addEventListener('click', () => openModal('modal-settings'));
   el('btn-community')?.addEventListener('click', () => openModal('modal-community'));
   el('modal-community-close')?.addEventListener('click', () => closeModal('modal-community'));
   el('modal-community')?.addEventListener('click', e => { if (e.target === el('modal-community')) closeModal('modal-community'); });
+  el('modal-settings-close')?.addEventListener('click', () => closeModal('modal-settings'));
+  el('modal-settings')?.addEventListener('click', e => { if (e.target === el('modal-settings')) closeModal('modal-settings'); });
 
   // Main menu enter
   el('btn-enter')?.addEventListener('click', () => {

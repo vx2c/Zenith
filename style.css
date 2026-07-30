@@ -465,23 +465,42 @@ html.dark .btn-enter:hover {
   display: flex;
   height: 100vh;
   overflow: hidden;
-  padding: 16px;
-  gap: 16px;
-  background: #0a0a0a;
+  padding: 20px;
+  gap: 20px;
+  background: #e8e8ea;
+}
+html.dark .app-shell {
+  background: #0d0d0f;
 }
 
 /* ── Sidebar: Floating Panel ──────────── */
 .sidebar {
   width: 260px;
   flex-shrink: 0;
-  background: #141414;
-  border-radius: 16px;
+  background: #ffffff;
+  border-radius: 24px;
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  transition: width 0.3s cubic-bezier(0.4,0,0.2,1);
-  box-shadow: 0 8px 32px rgba(0,0,0,0.4), 0 0 0 1px rgba(255,255,255,0.06);
-  border: 1px solid rgba(255,255,255,0.08);
+  transition: width 0.3s cubic-bezier(0.4,0,0.2,1), opacity 0.25s ease, transform 0.25s ease;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.08), 0 0 0 1px rgba(0,0,0,0.04);
+  border: 1px solid rgba(0,0,0,0.06);
+}
+html.dark .sidebar {
+  background: #1e1e1f;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.3), 0 0 0 1px rgba(255,255,255,0.06);
+  border: 1px solid rgba(255,255,255,0.06);
+}
+
+/* Hidden floating state - completely hide sidebar */
+.sidebar.hidden-floating {
+  width: 0;
+  opacity: 0;
+  transform: translateX(-20px);
+  pointer-events: none;
+  padding: 0;
+  margin: 0;
+  overflow: hidden;
 }
 
 /* Collapsed: icons only */
@@ -647,10 +666,15 @@ body.sidebar-collapsed #btn-sidebar-reopen { display: flex; }
   flex: 1;
   display: flex; flex-direction: column;
   overflow: hidden;
-  background: #141414;
-  border-radius: 16px;
-  box-shadow: 0 8px 32px rgba(0,0,0,0.4), 0 0 0 1px rgba(255,255,255,0.06);
-  border: 1px solid rgba(255,255,255,0.08);
+  background: #ffffff;
+  border-radius: 24px;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.08), 0 0 0 1px rgba(0,0,0,0.04);
+  border: 1px solid rgba(0,0,0,0.06);
+}
+html.dark .main-area {
+  background: #1e1e1f;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.3), 0 0 0 1px rgba(255,255,255,0.06);
+  border: 1px solid rgba(255,255,255,0.06);
 }
 
 .panel { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
@@ -1035,42 +1059,33 @@ html.dark .z-card-badge--error     { background: rgba(248,113,113,0.15); color: 
   align-self: center;
   display: flex; flex-direction: column;
 }
-/* ── Orbiting light around chat input ── */
-@keyframes ziOrbit {
-  to { transform: translate(-50%,-50%) rotate(360deg); }
-}
+/* ── Chat Input: Clean floating input without box ── */
 .input-glow-wrap {
   position: relative;
   border-radius: 18px;
-  padding: 2px;
-  overflow: hidden;
+  padding: 0;
+  overflow: visible;
   background: transparent;
 }
 .input-glow-wrap::before {
   content: '';
-  position: absolute;
-  top: 50%; left: 50%;
-  width: 200%; height: 200%;
-  transform: translate(-50%,-50%) rotate(0deg);
-  background: conic-gradient(from 0deg, transparent 310deg, #a855f7 340deg, #e879f9 348deg, #38bdf8 355deg, transparent 360deg);
-  animation: ziOrbit 2.2s linear infinite;
-  z-index: 0;
+  display: none;
 }
 .input-glow-inner {
   position: relative;
   z-index: 1;
-  border-radius: 16px;
-  background: #fff;
-  overflow: hidden;
+  border-radius: 0;
+  background: transparent;
+  overflow: visible;
 }
-html.dark .input-glow-inner { background: #1c1c1c; }
+html.dark .input-glow-inner { background: transparent; }
 
 .input-wrap {
   display: flex; align-items: flex-end; gap: 8px;
   background: transparent;
   border: none;
-  border-radius: 16px;
-  padding: 10px 10px 10px 16px;
+  border-radius: 0;
+  padding: 12px 0;
   box-shadow: none;
   transition: none;
 }
@@ -1090,6 +1105,7 @@ html.dark .input-glow-inner { background: #1c1c1c; }
   line-height: 1.6;
   max-height: 200px;
   overflow-y: auto;
+  padding: 0;
 }
 #chat-input::placeholder { color: #9ca3af; }
 .input-btns { display: flex; align-items: center; gap: 4px; }
@@ -1164,7 +1180,7 @@ html.dark .btn-afk-continue { background: #f0f0f0; color: #111; }
 }
 .modal {
   width: min(400px, 100%);
-  border-radius: 20px;
+  border-radius: 24px;
   padding: 32px;
   display: flex; flex-direction: column; gap: 18px;
   transform: scale(0.92); opacity: 0;
@@ -1173,11 +1189,48 @@ html.dark .btn-afk-continue { background: #f0f0f0; color: #111; }
 .modal.in  { transform: scale(1); opacity: 1; }
 .modal.out { transform: scale(0.92); opacity: 0; }
 
+/* Settings Modal - Larger floating window */
+.settings-modal {
+  width: min(520px, 92vw);
+  padding: 0;
+  border-radius: 24px;
+  overflow: hidden;
+}
+.settings-modal-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 24px 28px;
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+  background: rgba(255,255,255,0.02);
+}
+.settings-modal-title {
+  display: flex; align-items: center; gap: 12px;
+  color: #f0f0f0;
+}
+.settings-modal-title h3 {
+  margin: 0; font-size: 1.2rem; font-weight: 700; letter-spacing: -0.02em;
+}
+.modal-close-btn {
+  width: 32px; height: 32px;
+  border-radius: 10px;
+  display: grid; place-items: center;
+  color: #888;
+  transition: background 0.15s, color 0.15s;
+}
+.modal-close-btn:hover {
+  background: rgba(255,255,255,0.08);
+  color: #f0f0f0;
+}
+.settings-modal-body {
+  padding: 28px;
+  max-height: 60vh;
+  overflow-y: auto;
+}
+
 .glass {
   background: #141414;
   backdrop-filter: blur(24px);
   border: 1px solid rgba(255,255,255,0.08);
-  border-radius: 16px;
+  border-radius: 24px;
   box-shadow: 0 24px 60px rgba(0,0,0,0.5), 0 0 0 1px rgba(255,255,255,0.06);
 }
 
