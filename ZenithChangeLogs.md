@@ -227,3 +227,20 @@ Nunca sobrescribir registros anteriores. Siempre agregar la nueva entrada al fin
 
 - Motivo:
   - El agente creaba planes detallados y luego paraba sin ejecutarlos, requiriendo que el usuario repitiera el mensaje para que funcionara (comportamiento observado en screenshot del usuario). La causa era `EXPLANATION_DIRECTIVE` que se activaba prematuramente. Ahora el agente continúa hasta completar todos los pasos del plan.
+
+## [2026-07-30 02:10 UTC]
+
+- Archivos modificados:
+  - artifacts/zenith/src/components/dashboard.tsx
+  - ZenithChangeLogs.md
+
+- Cambios realizados:
+  - **Fondo animado**: Reemplazado el gradiente estático (que era azul/negro plano) por una animación tipo olas suaves (`bgWave`) que mezcla 2 colores: dark mode usa `#0a0a0a` + `#111111` + tonos intermedios; light mode usa `#f5f5f7` + `#eceef5`. Sin brillo, sin glow. Se aplica via clase CSS `zenith-bg-dark` / `zenith-bg-light`.
+  - **Input limpio**: Eliminado el borde giratorio conic-gradient (`zi-input-wrap::before` con animación `ziOrbit`). Reemplazado por un borde estático simple con focus state suave. Sin animaciones en el input.
+  - **Sidebar colapsado**: Ahora muestra el ícono de Zenith (favicon) incluso cuando está colapsado, solo oculta el texto "Zenith". Los botones de nav solo muestran íconos (ya era así, se confirmó correcto).
+  - **Botón flotante eliminado**: Quitado el botón flotante separado que aparecía al colapsar el sidebar. El toggle está solo dentro del sidebar — el mismo botón abre y cierra.
+  - **Color consistente**: Sidebar y panel principal ahora usan el mismo color de fondo (`#131313` dark / `#ffffff` light), sin diferencia de tono entre los dos paneles. Eliminado el `backdropFilter: blur` que causaba diferencias de color según el fondo.
+  - Quitado el overlay radial-gradient de brillo blanco que había sobre el fondo.
+
+- Motivo:
+  - Corrección de problemas visuales reportados por el usuario: fondo con color azul inesperado, input con borde animado feo, botón flotante redundante al colapsar sidebar, diferencia de color entre los 2 paneles flotantes, y ícono de Zenith que desaparecía al colapsar.

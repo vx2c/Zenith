@@ -55,22 +55,22 @@ const BASE = import.meta.env.BASE_URL?.replace(/\/$/, '') ?? '';
 function mkTheme(isDark: boolean) {
   return isDark
     ? {
-        bg: 'linear-gradient(180deg,#0a0a0a 0%,#111 40%,#000 100%)',
-        sidebar: 'rgba(14,14,14,0.96)',
-        sidebarShadow: '0 30px 70px rgba(0,0,0,.5)',
+        bg: '',                              // handled by CSS class
+        sidebar: '#131313',
+        sidebarShadow: '0 20px 50px rgba(0,0,0,.45)',
         sidebarBorder: '1px solid rgba(255,255,255,0.07)',
-        card: '#181818',
+        card: '#1a1a1a',
         cardBorder: 'rgba(255,255,255,0.07)',
         text: '#f0f0f0',
         textSub: '#888',
-        main: 'rgba(15,15,15,0.97)',
-        mainShadow: '0 42px 120px rgba(0,0,0,.5)',
+        main: '#131313',
+        mainShadow: '0 20px 50px rgba(0,0,0,.45)',
         navActive: '#f0f0f0',
         navActiveText: '#111',
         navHover: 'rgba(255,255,255,0.06)',
         inputBg: '#1c1c1c',
-        inputBorder: '#333',
-        inputFocus: '#666',
+        inputBorder: 'rgba(255,255,255,0.12)',
+        inputFocus: 'rgba(255,255,255,0.28)',
         userMsg: '#e8e8e8',
         userMsgText: '#111',
         aiMsg: '#1e1e1e',
@@ -86,34 +86,34 @@ function mkTheme(isDark: boolean) {
         modalCard: '#161616',
       }
     : {
-        bg: 'linear-gradient(180deg,#fff 0%,#e8e8e8 40%,#111 100%)',
-        sidebar: 'rgba(255,255,255,0.88)',
-        sidebarShadow: '0 30px 70px rgba(0,0,0,.08)',
-        sidebarBorder: 'none',
+        bg: '',                              // handled by CSS class
+        sidebar: '#ffffff',
+        sidebarShadow: '0 20px 50px rgba(0,0,0,.07)',
+        sidebarBorder: '1px solid rgba(0,0,0,0.06)',
         card: '#f9fafb',
-        cardBorder: '#f0f0f0',
+        cardBorder: '#efefef',
         text: '#111',
         textSub: '#6b7280',
-        main: 'rgba(255,255,255,0.94)',
-        mainShadow: '0 42px 120px rgba(0,0,0,.12)',
+        main: '#ffffff',
+        mainShadow: '0 20px 50px rgba(0,0,0,.07)',
         navActive: '#111',
         navActiveText: '#fff',
-        navHover: '#f9fafb',
-        inputBg: '#f9fafb',
-        inputBorder: '#e5e7eb',
-        inputFocus: '#111',
+        navHover: '#f5f5f5',
+        inputBg: '#f5f5f7',
+        inputBorder: 'rgba(0,0,0,0.12)',
+        inputFocus: 'rgba(0,0,0,0.3)',
         userMsg: '#111',
         userMsgText: '#fff',
         aiMsg: '#f3f4f6',
         aiMsgText: '#111',
-        divider: '#f3f4f6',
+        divider: '#efefef',
         statBg: '#f9fafb',
         tagBg: '#f3f4f6',
         tagText: '#9ca3af',
         errorBg: '#fef2f2',
         errorBorder: '#fecaca',
         errorText: '#dc2626',
-        modalBg: 'rgba(0,0,0,0.6)',
+        modalBg: 'rgba(0,0,0,0.55)',
         modalCard: '#fff',
       };
 }
@@ -1076,10 +1076,14 @@ function AssistantPanel({ isDark, lang, pluginSession }: { isDark: boolean; lang
         </div>
 
         <div className="zi-input-wrap">
-          <div className="zi-input-inner" style={{ background: th.inputBg }}>
+          <div className="zi-input-inner"
+            style={{ background: th.inputBg, border: `1.5px solid ${th.inputBorder}`,
+              borderRadius: 14, transition: 'border-color 0.2s' }}
+            onFocusCapture={e => { (e.currentTarget as HTMLDivElement).style.borderColor = th.inputFocus; }}
+            onBlurCapture={e => { (e.currentTarget as HTMLDivElement).style.borderColor = th.inputBorder; }}>
             <textarea ref={textareaRef} value={input} onChange={onInputChange} onKeyDown={onKeyDown}
               placeholder={T.placeholder} rows={1} disabled={loading}
-              style={{ width: '100%', resize: 'none', border: 'none', borderRadius: 16,
+              style={{ width: '100%', resize: 'none', border: 'none', borderRadius: 14,
                 padding: '0.75rem 1rem', fontSize: '1rem', fontFamily: "'Inter', sans-serif",
                 outline: 'none', background: 'transparent', color: th.text, lineHeight: 1.5,
                 maxHeight: 120, overflowY: 'auto',
@@ -1223,73 +1227,44 @@ export default function Dashboard({ userName }: DashboardProps) {
   const SIDEBAR_W = sidebarOpen ? 260 : 72;
 
   return (
-    <div className="min-h-screen w-full flex items-center justify-center p-6"
-      style={{ background: th.bg, position: 'relative' }}>
+    <div className={`min-h-screen w-full flex items-center justify-center p-6 ${isDark ? 'zenith-bg-dark' : 'zenith-bg-light'}`}
+      style={{ position: 'relative' }}>
 
       <style>{`
-        @keyframes spin       { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+        @keyframes spin        { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
         @keyframes zenithPulse { 0%,100% { opacity:1; transform:scale(1); } 50% { opacity:.5; transform:scale(.8); } }
+        @keyframes bgWave {
+          0%,100% { background-position: 0% 50%; }
+          50%      { background-position: 100% 50%; }
+        }
         * { font-family: 'Inter', sans-serif; }
-        @keyframes ziOrbit { to { transform: translate(-50%,-50%) rotate(360deg); } }
+
+        /* ── Animated backgrounds ───────────────────── */
+        .zenith-bg-dark {
+          background: linear-gradient(-45deg, #0a0a0a, #111111, #0d0d12, #0f0f0f, #0a0a0a);
+          background-size: 500% 500%;
+          animation: bgWave 14s ease infinite;
+        }
+        .zenith-bg-light {
+          background: linear-gradient(-45deg, #f5f5f7, #eceef5, #f0f2f8, #eaecf3, #f5f5f7);
+          background-size: 500% 500%;
+          animation: bgWave 14s ease infinite;
+        }
+
+        /* ── Clean input ───────────────────────────── */
         .zi-input-wrap {
-          position: relative;
           flex: 1;
-          border-radius: 18px;
-          padding: 2px;
-          overflow: hidden;
+          border-radius: 14px;
           background: transparent;
         }
-        .zi-input-wrap::before {
-          content: '';
-          position: absolute;
-          top: 50%; left: 50%;
-          width: 220%; height: 220%;
-          transform: translate(-50%,-50%) rotate(0deg);
-          background: conic-gradient(
-            from 0deg,
-            rgba(168,85,247,0)   0deg,
-            rgba(168,85,247,0.4) 20deg,
-            #a855f7              70deg,
-            #e879f9              130deg,
-            #38bdf8              190deg,
-            #7c3aed              250deg,
-            rgba(124,58,237,0.4) 315deg,
-            rgba(168,85,247,0)   345deg,
-            rgba(168,85,247,0)   360deg
-          );
-          animation: ziOrbit 2.4s linear infinite;
-          z-index: 0;
-        }
         .zi-input-inner {
-          position: relative;
-          z-index: 1;
-          border-radius: 16px;
+          border-radius: 14px;
           overflow: hidden;
         }
       `}</style>
 
-      <div className="absolute inset-0" style={{
-        background: 'radial-gradient(circle at 50% 0%,rgba(255,255,255,.1),transparent 60%)',
-        pointerEvents: 'none' }} />
-
       {/* AFK overlay */}
       {isAFK && <AFKScreen userName={userName} onDismiss={dismissAFK} isDark={isDark} lang={lang} />}
-
-      {/* Floating sidebar reopen button — only when sidebar is collapsed */}
-      {!sidebarOpen && (
-        <button
-          onClick={() => setSidebarOpen(true)}
-          title="Open sidebar"
-          style={{ position: 'fixed', left: '1rem', top: '50%', transform: 'translateY(-50%)',
-            zIndex: 200, width: 36, height: 36, borderRadius: 12,
-            background: th.sidebar, border: `1px solid ${th.divider}`,
-            boxShadow: th.sidebarShadow, cursor: 'pointer',
-            display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'all 0.2s' }}
-          onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.background = isDark ? 'rgba(255,255,255,0.12)' : '#f0f0f0'; }}
-          onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.background = th.sidebar; }}>
-          <ChevronRight size={18} color={th.textSub} />
-        </button>
-      )}
 
       {/* Community modal */}
       {showCommunity && <CommunityModal onClose={() => setShowCommunity(false)} isDark={isDark} lang={lang} />}
@@ -1306,22 +1281,23 @@ export default function Dashboard({ userName }: DashboardProps) {
           display: 'flex', flexDirection: 'column', gap: '1.5rem', overflow: 'hidden',
         }}>
           {/* Brand + Toggle */}
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: sidebarOpen ? 'space-between' : 'center' }}>
-            {sidebarOpen && (
-              <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', overflow: 'hidden' }}>
-                <img src={`${import.meta.env.BASE_URL}favicon.png`} alt="Zenith"
-                  style={{ width: 36, height: 36, borderRadius: 10, objectFit: 'cover', flexShrink: 0 }}
-                  onError={e => { (e.currentTarget as HTMLImageElement).style.display='none'; }} />
-                <h2 style={{ fontSize: '1.25rem', fontWeight: 700, color: th.text, whiteSpace: 'nowrap' }}>Zenith</h2>
-              </div>
-            )}
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: sidebarOpen ? 'space-between' : 'center', gap: '0.5rem' }}>
+            {/* Logo icon always visible; text only when open */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', overflow: 'hidden', flex: sidebarOpen ? 1 : 0 }}>
+              <img src={`${import.meta.env.BASE_URL}favicon.png`} alt="Zenith"
+                style={{ width: 34, height: 34, borderRadius: 10, objectFit: 'cover', flexShrink: 0 }}
+                onError={e => { (e.currentTarget as HTMLImageElement).style.display='none'; }} />
+              {sidebarOpen && (
+                <h2 style={{ fontSize: '1.2rem', fontWeight: 700, color: th.text, whiteSpace: 'nowrap', margin: 0 }}>Zenith</h2>
+              )}
+            </div>
             <button onClick={() => setSidebarOpen(v => !v)}
-              style={{ width: 32, height: 32, borderRadius: 10, border: `1px solid ${th.divider}`,
+              style={{ width: 30, height: 30, borderRadius: 9, border: `1px solid ${th.divider}`,
                 background: 'transparent', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
                 flexShrink: 0, transition: 'all 0.2s', color: th.textSub }}
               onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.background = isDark ? 'rgba(255,255,255,0.06)' : '#f5f5f5'; }}
               onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.background = 'transparent'; }}>
-              {sidebarOpen ? <ChevronLeft size={16} color={th.textSub} /> : <ChevronRight size={16} color={th.textSub} />}
+              {sidebarOpen ? <ChevronLeft size={15} color={th.textSub} /> : <ChevronRight size={15} color={th.textSub} />}
             </button>
           </div>
 
