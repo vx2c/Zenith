@@ -140,6 +140,30 @@ function initWaveCanvas(canvas, opts = {}) {
   _waveLoops.set(canvas, { stop() { if (raf) cancelAnimationFrame(raf); window.removeEventListener('resize', onResize); } });
 }
 
+// ── Particle animation background ──────────────────────────
+function initParticles() {
+  const container = document.getElementById('particle-container');
+  if (!container) return;
+  
+  container.innerHTML = '';
+  const particleCount = 50;
+  
+  for (let i = 0; i < particleCount; i++) {
+    const particle = document.createElement('div');
+    particle.className = 'particle';
+    
+    const size = Math.random() * 4 + 2;
+    particle.style.width = `${size}px`;
+    particle.style.height = `${size}px`;
+    particle.style.left = `${Math.random() * 100}%`;
+    particle.style.animationDuration = `${Math.random() * 10 + 10}s`;
+    particle.style.animationDelay = `${Math.random() * 5}s`;
+    particle.style.opacity = Math.random() * 0.5 + 0.2;
+    
+    container.appendChild(particle);
+  }
+}
+
 // ── Typewriter helper (delete + retype through a list of phrases) ──────
 function startTypewriter(el, phrases, opts = {}) {
   if (!el || !phrases || !phrases.length) return;
@@ -199,6 +223,7 @@ function initLandingChat() {
 // ── Boot ─────────────────────────────────────
 document.addEventListener('DOMContentLoaded', () => {
   applyTheme(getSetting('theme', 'light'));
+  initParticles();
   const { displayName } = getUser();
   if (displayName) {
     const hasEntered = sessionStorage.getItem('z_entered');
