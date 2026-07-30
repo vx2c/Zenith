@@ -65,6 +65,35 @@ function hasWriteIntent(text) {
   return !!text && WRITE_INTENT_PATTERNS.some(re => re.test(text));
 }
 
+// Companion to hasWriteIntent: detects "I have something that already
+// exists and it's broken" framing, as opposed to "build me something new".
+// Used to gate CREATE_TOOLS behind an actual read_script — see T17/the
+// bug-report-vs-build-request distinction and the READ_BEFORE_CREATE_GATE
+// below. Deliberately broader than the earlier "no funciona" check so it
+// also catches "cuando lo toco no muero" style descriptions of specific
+// broken behavior, not just an explicit "doesn't work" statement.
+const BUG_REPORT_PATTERNS = [
+  /\b(no funciona|no anda|no sirve|se rompi[oó]|est[aá] roto|no me deja|sigue fallando|sigue sin funcionar)\b/i,
+  /\b(doesn'?t work|isn'?t working|is broken|stopped working|keeps failing|still fails|still broken)\b/i,
+  /\bcuando\s+\w+.{0,30}\bno\s+(muero|funciona|pasa|recibo|gano|obtengo)\b/i, // "cuando lo toco no muero"
+  /\bwhen\s+\w+.{0,30}\bdoesn'?t\s+(work|happen|trigger|fire)\b/i,
+  /\btengo un (problema|bug|error)\b/i,
+  /\b(hay un bug|tiene un bug|hay un error)\b/i,
+];
+function hasBugReportIntent(text) {
+  return !!text && BUG_REPORT_PATTERNS.some(re => re.test(text));
+}
+
+// Tools that invent a brand-new named entity, as opposed to reading or
+// modifying something that (may) already exist. These are exactly what
+// should NOT run as the first move on a bug report about an existing
+// system — see READ_BEFORE_CREATE_GATE.
+const CREATE_TOOLS = new Set([
+  'create_instance', 'create_gui', 'create_ui_element', 'create_part',
+  'create_model', 'create_spawn', 'create_remote_event',
+  'create_remote_function', 'create_folder', 'create_module', 'create_script',
+]);
+
 // Server-side compound-deliverable detector. The PLAN: mechanism relies on
 // the model itself recognizing "this request has multiple parts" and
 // enumerating them — a small/free model can just skip that and announce a
@@ -508,20 +537,11 @@ function validateToolCall(toolName, args) {
 
 // ── Parse TOOL:{...} lines from AI text output ─────────────────────────────
 // Counts braces so nested JSON objects are handled correctly.
-function extractToolCall(text) {
-  const prefix = 'TOOL:';
-  const idx = text.indexOf(prefix);
-  if (idx === -1) return null;
-
-  let start = idx + prefix.length;
-  while (start < text.length && /\s/.test(text[start])) start++;
+// Extracts a balanced {...} JSON substring starting at `start` (which must
+// point at the opening brace). Shared by both extraction paths below.
+function extractBalancedJsonAt(text, start) {
   if (text[start] !== '{') return null;
-
-  let depth = 0;
-  let inString = false;
-  let escape = false;
-  let end = -1;
-
+  let depth = 0, inString = false, escape = false, end = -1;
   for (let i = start; i < text.length; i++) {
     const ch = text[i];
     if (escape) { escape = false; continue; }
@@ -529,15 +549,63 @@ function extractToolCall(text) {
     if (ch === '"') { inString = !inString; continue; }
     if (inString) continue;
     if (ch === '{') depth++;
-    else if (ch === '}') {
-      depth--;
-      if (depth === 0) { end = i; break; }
+    else if (ch === '}') { depth--; if (depth === 0) { end = i; break; } }
+  }
+  if (end === -1) return null;
+  return text.slice(start, end + 1);
+}
+
+// Rescues common alternate tool-call envelopes that different models reach
+// for instead of our TOOL:{"name":...,"args":...} convention — they've
+// clearly seen OTHER agent frameworks' JSON schemas in training and default
+// to those under pressure. Recognizes:
+//   {"name":X,"args":Y}              (ours — passthrough)
+//   {"tool":X,"args":Y}              (wrong key name)
+//   {"name":X,"arguments":Y}         (wrong args key)
+//   {"tool":X,"arguments":Y}         (both wrong)
+//   {"commands":[{...}, ...]}        (multi-command envelope — takes first)
+//   {"tool_calls":[{...}, ...]}      (OpenAI-native-style naming)
+//   {"actions":[{...}, ...]}
+// Returns { name, args } or null — does NOT check tool support, caller does.
+function normalizeToolCallShape(parsed) {
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
+  const nameKey = typeof parsed.name === 'string' ? parsed.name : (typeof parsed.tool === 'string' ? parsed.tool : null);
+  if (nameKey) {
+    const argsVal = parsed.args !== undefined ? parsed.args : (parsed.arguments !== undefined ? parsed.arguments : {});
+    return { name: nameKey, args: argsVal };
+  }
+  const list = Array.isArray(parsed.commands) ? parsed.commands
+    : Array.isArray(parsed.tool_calls) ? parsed.tool_calls
+    : Array.isArray(parsed.actions) ? parsed.actions
+    : null;
+  if (list && list.length > 0) return normalizeToolCallShape(list[0]);
+  return null;
+}
+
+function extractToolCall(text) {
+  const prefix = 'TOOL:';
+  const idx = text.indexOf(prefix);
+
+  let jsonStr = null;
+  if (idx !== -1) {
+    let start = idx + prefix.length;
+    while (start < text.length && /\s/.test(text[start])) start++;
+    jsonStr = extractBalancedJsonAt(text, start);
+  } else {
+    // No "TOOL:" prefix anywhere. Before giving up, check whether the
+    // response is essentially a JSON object the model wrote in place of the
+    // prefix convention — either right at the start, or after a legitimate
+    // "PLAN: ..." narration line (so a model that narrates AND forgets the
+    // prefix doesn't lose the whole tool call over a formatting slip).
+    const braceIdx = text.indexOf('{');
+    if (braceIdx !== -1) {
+      const before = text.slice(0, braceIdx).trim();
+      const acceptablePrefix = before === '' || /^PLAN:/i.test(before) || before.length < 40;
+      if (acceptablePrefix) jsonStr = extractBalancedJsonAt(text, braceIdx);
     }
   }
+  if (!jsonStr) return null;
 
-  if (end === -1) return null;
-
-  const jsonStr = text.slice(start, end + 1);
   let parsed;
   try {
     parsed = JSON.parse(jsonStr);
@@ -558,13 +626,14 @@ function extractToolCall(text) {
   // call at all", which routes back into the existing tool-enforcement
   // retry path (see agentLoop) so the model gets a clean second chance to
   // emit a correctly-shaped TOOL:{...} line — without burning a real round.
-  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
-  if (typeof parsed.name !== 'string' || !SUPPORTED_STUDIO_TOOLS.has(parsed.name)) return null;
-  if (parsed.args !== undefined && (typeof parsed.args !== 'object' || parsed.args === null || Array.isArray(parsed.args))) {
+  const normalized = normalizeToolCallShape(parsed);
+  if (!normalized) return null;
+  if (typeof normalized.name !== 'string' || !SUPPORTED_STUDIO_TOOLS.has(normalized.name)) return null;
+  if (normalized.args !== undefined && (typeof normalized.args !== 'object' || normalized.args === null || Array.isArray(normalized.args))) {
     return null;
   }
 
-  return parsed;
+  return normalized;
 }
 
 // ── Detect PLAN text in AI response ───────────────────────────────────────
@@ -646,62 +715,47 @@ function isAskingClarification(text) {
 function describeToolCallFailure(text) {
   const prefix = 'TOOL:';
   const idx = text.indexOf(prefix);
-  if (idx === -1) {
-    // No "TOOL:" prefix at all — but check if the response is essentially a
-    // bare JSON object shaped like a tool call attempt (has "tool"/"name"
-    // and "args" keys). Small/free models sometimes drop the required
-    // prefix entirely; without this check that raw JSON leaks straight to
-    // the user as if it were a normal answer instead of being retried.
-    const trimmed = text.trim();
-    if (trimmed.startsWith('{') && trimmed.endsWith('}')) {
-      try {
-        const parsed = JSON.parse(trimmed);
-        if (parsed && typeof parsed === 'object' && (parsed.tool || parsed.name) && parsed.args !== undefined) {
-          const wrongKey = parsed.tool && !parsed.name;
-          return {
-            attempted: true,
-            reason: 'malformed',
-            detail: wrongKey
-              ? `You wrote a bare JSON object using "tool" as the key name and no "TOOL:" prefix. ` +
-                `The correct format is: TOOL:{"name":"${parsed.tool}","args":${JSON.stringify(parsed.args)}} ` +
-                `— the prefix "TOOL:" is required, and the key must be "name", not "tool".`
-              : `You wrote a bare JSON object with no "TOOL:" prefix. The correct format is: ` +
-                `TOOL:${trimmed} — the prefix is required, nothing else on that line.`,
-          };
-        }
-      } catch { /* not valid JSON either — fall through to attempted:false */ }
-    }
-    return { attempted: false };
+
+  let jsonStr = null;
+  if (idx !== -1) {
+    let start = idx + prefix.length;
+    while (start < text.length && /\s/.test(text[start])) start++;
+    if (text[start] !== '{') return { attempted: true, reason: 'malformed', detail: 'TOOL: was not followed by a JSON object.' };
+    jsonStr = extractBalancedJsonAt(text, start);
+    if (!jsonStr) return { attempted: true, reason: 'malformed', detail: 'The TOOL:{...} JSON was never closed (unbalanced braces).' };
+  } else {
+    const braceIdx = text.indexOf('{');
+    if (braceIdx === -1) return { attempted: false };
+    const before = text.slice(0, braceIdx).trim();
+    const acceptablePrefix = before === '' || /^PLAN:/i.test(before) || before.length < 40;
+    if (!acceptablePrefix) return { attempted: false };
+    jsonStr = extractBalancedJsonAt(text, braceIdx);
+    if (!jsonStr) return { attempted: false };
   }
 
-  let start = idx + prefix.length;
-  while (start < text.length && /\s/.test(text[start])) start++;
-  if (text[start] !== '{') return { attempted: true, reason: 'malformed', detail: 'TOOL: was not followed by a JSON object.' };
-
-  let depth = 0, inString = false, escape = false, end = -1;
-  for (let i = start; i < text.length; i++) {
-    const ch = text[i];
-    if (escape) { escape = false; continue; }
-    if (ch === '\\' && inString) { escape = true; continue; }
-    if (ch === '"') { inString = !inString; continue; }
-    if (inString) continue;
-    if (ch === '{') depth++;
-    else if (ch === '}') { depth--; if (depth === 0) { end = i; break; } }
-  }
-  if (end === -1) return { attempted: true, reason: 'malformed', detail: 'The TOOL:{...} JSON was never closed (unbalanced braces).' };
-
-  const jsonStr = text.slice(start, end + 1);
   let parsed;
   try {
     parsed = JSON.parse(jsonStr);
   } catch (e) {
-    return { attempted: true, reason: 'malformed', detail: `Invalid JSON syntax: ${e.message}` };
+    return idx !== -1
+      ? { attempted: true, reason: 'malformed', detail: `Invalid JSON syntax: ${e.message}` }
+      : { attempted: false };
   }
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
     return { attempted: true, reason: 'shape', detail: 'TOOL: JSON must be an object, not an array or primitive.' };
   }
-  if (typeof parsed.name !== 'string' || !SUPPORTED_STUDIO_TOOLS.has(parsed.name)) {
-    return { attempted: true, reason: 'shape', detail: `"name" must be one of the supported tools (got ${JSON.stringify(parsed.name)}).` };
+
+  const normalized = normalizeToolCallShape(parsed);
+  if (!normalized) {
+    return {
+      attempted: true,
+      reason: 'shape',
+      detail: 'Could not find a "name"/"tool" key (or a "commands"/"tool_calls"/"actions" array) anywhere in ' +
+        'the JSON you wrote. Use exactly: TOOL:{"name":"...","args":{...}}',
+    };
+  }
+  if (typeof normalized.name !== 'string' || !SUPPORTED_STUDIO_TOOLS.has(normalized.name)) {
+    return { attempted: true, reason: 'shape', detail: `"name" must be one of the supported tools (got ${JSON.stringify(normalized.name)}).` };
   }
   return { attempted: true, reason: 'shape', detail: '"args" must be a JSON object.' };
 }
@@ -1188,6 +1242,8 @@ async function agentLoop(messages, apiKey, model, sessionId, res, needsStudio, t
   const MAX_PENDING_STEPS_ROUNDS = 6; // pendingStep text-matching is fuzzy; don't let a stale
   let toolsExecuted = 0; // how many tools have actually run this turn
   let writeToolsExecuted = 0; // how many of those were successful WRITE_TOOLS (create/update/etc.)
+  let readScriptExecuted = false; // has at least one read_script succeeded this task?
+  let readBeforeCreateGateUses = 0; // safety cap for the gate below
   let consecutiveReadRounds = 0; // read-only tools in a row without any write
   const toolResults = []; // Track all tool results to detect errors
   const completedSteps = [];
@@ -1549,7 +1605,22 @@ async function agentLoop(messages, apiKey, model, sessionId, res, needsStudio, t
     // Any other text before TOOL: is a hallucinated pre-execution claim
     // (e.g. "I'll update your script.") and must be discarded — it appears
     // to the user as success before the tool has even run.
-    const toolMarkerIdx = text.indexOf('TOOL:');
+    //
+    // Locate the JSON the SAME way extractToolCall did (prefix, or bare JSON
+    // near the start of the text) — not just via a literal "TOOL:" substring.
+    // Previously, when a tool call was rescued without a "TOOL:" prefix (see
+    // normalizeToolCallShape), toolMarkerIdx was always -1, so ANY narration
+    // the model wrote before that bare JSON was silently discarded even when
+    // it was a perfectly good "PLAN: ..." line — a real cause of "no
+    // narration ever shows up" independent of whether the model wrote one.
+    const toolPrefixIdx = text.indexOf('TOOL:');
+    const bareJsonIdx = text.indexOf('{');
+    let toolMarkerIdx = toolPrefixIdx;
+    if (toolPrefixIdx === -1 && bareJsonIdx !== -1) {
+      const before = text.slice(0, bareJsonIdx).trim();
+      const acceptablePrefix = before === '' || /^PLAN:/i.test(before) || before.length < 40;
+      toolMarkerIdx = acceptablePrefix ? bareJsonIdx : -1;
+    }
     const rawPreText = toolMarkerIdx > 0 ? text.slice(0, toolMarkerIdx).trim() : '';
     const safePreText = rawPreText.startsWith('PLAN:') ? rawPreText : '';
 
@@ -1585,6 +1656,37 @@ async function agentLoop(messages, apiKey, model, sessionId, res, needsStudio, t
       }
     }
 
+    // ── READ_BEFORE_CREATE_GATE ─────────────────────────────────────────────
+    // T17 (system prompt) already ASKS the model to read before creating on
+    // a bug report — but that's just a suggestion, and a confident model can
+    // rationalize skipping it ("a button normally needs a RemoteEvent") the
+    // same way a human developer might guess instead of actually checking.
+    // This is the code-level version of that same rule: it does not depend
+    // on the model choosing to comply.
+    if (
+      CREATE_TOOLS.has(toolCall.name) &&
+      !readScriptExecuted &&
+      messages.some(m => m.role === 'user' && hasBugReportIntent(m.content || '')) &&
+      round < MAX_ROUNDS - 1 &&
+      readBeforeCreateGateUses < 2
+    ) {
+      readBeforeCreateGateUses++;
+      messages = [
+        ...messages,
+        { role: 'assistant', content: text },
+        {
+          role: 'user',
+          content:
+            `SYSTEM: Blocked — you tried to run "${toolCall.name}" (creates a new "${toolCall.args?.name || toolCall.args?.className || 'entity'}"), ` +
+            'but this is a bug report about an EXISTING system and you have not read any script yet this task. ' +
+            'Do NOT create anything new until you have used read_script on the relevant existing script(s) and ' +
+            'confirmed, from what you actually read, that the piece you want to create genuinely does not already ' +
+            'exist. Output ONLY the read_script TOOL:{...} call now.',
+        },
+      ];
+      continue;
+    }
+
     // Timeline: tool running (mini card)
     const tlLabel  = toolLabelFor(toolCall.name);
     const tlDetail = toolDetailFor(toolCall.name, toolCall.args || {});
@@ -1611,6 +1713,7 @@ async function agentLoop(messages, apiKey, model, sessionId, res, needsStudio, t
     toolResults.push(toolResult); // Track result for error detection
     toolsExecuted++;
     if (!isError && WRITE_TOOLS.has(toolCall.name)) writeToolsExecuted++;
+    if (!isError && toolCall.name === 'read_script') readScriptExecuted = true;
 
     // Track which mentioned targets have been read (for investigation enforcement)
     if (!isError && toolCall.name === 'read_script' && mentionedTargets.length > 0) {
