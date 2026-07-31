@@ -1128,7 +1128,8 @@ function wire() {
   });
   el('chat-input').addEventListener('input', function () {
     this.style.height = 'auto';
-    this.style.height = Math.min(this.scrollHeight, 200) + 'px';
+    const newHeight = Math.min(this.scrollHeight, 120);
+    this.style.height = newHeight + 'px';
   });
 
   // Plus menu
