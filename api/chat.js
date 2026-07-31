@@ -94,23 +94,65 @@ const CREATE_TOOLS = new Set([
   'create_remote_function', 'create_folder', 'create_module', 'create_script',
 ]);
 
-// Server-side compound-deliverable detector. The PLAN: mechanism relies on
-// the model itself recognizing "this request has multiple parts" and
-// enumerating them — a small/free model can just skip that and announce a
-// single generic step instead, which is exactly what happened here: it
-// built the RemoteEvent/handler/script trio and never even acknowledged
-// the GUI was a separate promised deliverable. Detecting this from the raw
-// request text (not the model's self-report) means the checklist exists
-// even when the model doesn't bother writing one.
-const DELIVERABLE_BUCKETS = [
-  { key: 'gui',   label: 'Create the GUI/interface (screen, button, etc.) described in the request', re: /\b(gui|screengui|bot[oó]n\w*|button|interfaz|textbutton|frame)\b/i },
-  { key: 'logic', label: 'Create/wire the backend logic (script, RemoteEvent, leaderstats, etc.) described in the request', re: /\b(leaderstats|dinero|money|remoteevent|evento|script|servidor|handler|server\s*script)\b/i },
-];
-function detectCompoundDeliverables(text) {
+// Domain-agnostic compound-request detection. Replaces the old fixed
+// GUI-vs-Backend bucket system (which only ever produced 2 categories no
+// matter how many distinct pieces a request actually had — confirmed by
+// Evidence #1 and #2 in ZenithValidationLog.md). Two independent, purely
+// structural signals, neither of which needs to know what any Roblox
+// concept IS:
+//
+//   1. splitActionClauses — finds multiple independent clauses joined by
+//      conjunctions ("crea X y crea Y"), each with its own action verb.
+//      Produces the LITERAL clause text as seeded checklist items — no
+//      guessing at meaning, just syntax.
+//
+//   2. countTechnicalTerms — counts distinct CamelCase/ALL-CAPS tokens
+//      (TextLabel, WalkMoney, GUI, RemoteEvent, ...). Roblox identifiers
+//      are conventionally named this way regardless of domain, so this
+//      catches requests written as ONE flowing sentence that still names
+//      several distinct pieces (e.g. "a GUI with a TextLabel that updates
+//      via WalkMoney/WalkEvent") — a case #1 alone cannot split, since
+//      there's no conjunction to split on. This signal does NOT try to
+//      auto-generate checklist items (we'd be guessing at structure we
+//      don't understand) — it instead demands the MODEL write its own
+//      detailed plan. See looksComplexButUnstructured below and its use
+//      in the TOOL_CALL_DIRECTIVE injection at task start.
+const CLAUSE_SPLIT_PATTERN = /,?\s+(?:y\s+(?:tambi[ée]n\s+)?|adem[aá]s\s+(?:de\s+)?|y\s+luego\s+|luego\s+|despu[eé]s\s+|and\s+(?:also\s+)?|then\s+|also\s+)/i;
+
+function splitActionClauses(text) {
   if (!text) return [];
-  const matched = DELIVERABLE_BUCKETS.filter(b => b.re.test(text));
-  return matched.length >= 2 ? matched.map(b => b.label) : [];
+  const sentences = text.split(/(?<=[.!?])\s+/);
+  const clauses = [];
+  for (const sentence of sentences) {
+    const parts = sentence.split(CLAUSE_SPLIT_PATTERN).map(p => p.trim()).filter(Boolean);
+    clauses.push(...parts);
+  }
+  // Only keep clauses that independently show their own action verb —
+  // filters out pure context/background clauses ("I have a system that...").
+  return clauses.filter(c => hasWriteIntent(c) && c.length > 8);
 }
+
+function countTechnicalTerms(text) {
+  if (!text) return [];
+  const matches = text.match(/\b[A-Z]{2,}\b|\b[A-Z][a-z]+[A-Z][A-Za-z]*\b/g) || [];
+  return [...new Set(matches)];
+}
+
+function detectCompoundDeliverables(text) {
+  const clauses = splitActionClauses(text);
+  return clauses.length >= 2 ? clauses : [];
+}
+
+// True when a request looks complex (names 3+ distinct technical pieces)
+// but splitActionClauses couldn't literally extract separate steps from it
+// (no conjunctions to split on — a single flowing sentence). We can't seed
+// good checklist items ourselves here without guessing, so this signal is
+// used to make the round-0 directive REQUIRE the model to write its own
+// detailed numbered plan instead of just suggesting it.
+function looksComplexButUnstructured(text) {
+  return detectCompoundDeliverables(text).length === 0 && countTechnicalTerms(text).length >= 3;
+}
+
 
 // Small/free fallback models are heavily RLHF'd to disclaim real-world
 // capability ("I don't have real-time access", "I'm just an AI") and can
@@ -1260,6 +1302,12 @@ async function agentLoop(messages, apiKey, model, sessionId, res, needsStudio, t
   const completedSteps = [];
   const taskEvents = [];
   const pendingSteps = Array.isArray(task?.plan) ? [...task.plan] : [];
+  // True until the model writes its OWN numbered plan for the first time.
+  // Distinguishes "this checklist came from the server-side auto-detector"
+  // (generic, best-effort) from "the model wrote this" (specific, trusted
+  // more) — see the PLAN: parsing below, which REPLACES rather than
+  // appends the first time the model provides its own multi-item plan.
+  let pendingStepsAreAutoSeeded = pendingSteps.length > 0;
   
   // Extract targets mentioned by user to enforce investigation before writing
   const mentionedTargets = extractMentionedTargets(messages);
@@ -1754,8 +1802,18 @@ async function agentLoop(messages, apiKey, model, sessionId, res, needsStudio, t
           .map(m => m[1].trim())
           .filter(Boolean);
         const stepsToAdd = numberedItems.length > 1 ? numberedItems : [planText];
-        task.plan = [...(task.plan || []), ...stepsToAdd];
-        pendingSteps.push(...stepsToAdd);
+        if (numberedItems.length > 1 && pendingStepsAreAutoSeeded) {
+          // The model just provided its own detailed breakdown for the
+          // first time — replace the generic server-seeded checklist
+          // instead of piling the model's items on top of it.
+          task.plan = stepsToAdd;
+          pendingSteps.length = 0;
+          pendingSteps.push(...stepsToAdd);
+          pendingStepsAreAutoSeeded = false;
+        } else {
+          task.plan = [...(task.plan || []), ...stepsToAdd];
+          pendingSteps.push(...stepsToAdd);
+        }
         emitWorkspaceEvent({
           id: 'workspace-plan',
           type: 'plan',
@@ -1981,15 +2039,33 @@ module.exports = async function handler(req, res) {
       console.warn(`[chat] workspace task initialization failed: ${error.message}`);
       workspaceTask = { taskId: taskId || null, objective, plan: [] };
     }
-    // Force-seed the checklist for compound requests (GUI + backend logic)
-    // instead of relying solely on the model to enumerate them itself.
+    // Force-seed the checklist for compound requests using the domain-
+    // agnostic clause-splitter (see detectCompoundDeliverables) instead of
+    // relying solely on the model to enumerate them itself.
     const forcedDeliverables = detectCompoundDeliverables(objective);
     if (forcedDeliverables.length > 0 && workspaceTask) {
       workspaceTask.plan = [...(workspaceTask.plan || []), ...forcedDeliverables];
     }
+    // The request names 3+ distinct technical pieces but is one flowing
+    // sentence with no conjunction to split on (see Evidence #2 in
+    // ZenithValidationLog.md — "a GUI with a TextLabel that increases as
+    // the player earns money while walking" never splits, but clearly
+    // names GUI + TextLabel + WalkMoney + WalkEvent). We can't seed good
+    // checklist items ourselves without guessing at structure, so instead
+    // require the model to do that decomposition explicitly before acting.
+    let finalSystemPrompt = systemPrompt;
+    if (looksComplexButUnstructured(objective)) {
+      finalSystemPrompt +=
+        '\n\n--- COMPLEX REQUEST DETECTED ---\n' +
+        'This request names several distinct technical pieces. Before calling any tool, output a full ' +
+        'numbered "PLAN: 1. ... 2. ... 3. ..." listing EVERY distinct deliverable you can identify — GUI ' +
+        'elements, scripts, connections between them, effects, anything named or implied. This is NOT ' +
+        'optional for this request. Each numbered item becomes a checklist item you must complete before the ' +
+        'task is done.';
+    }
 
     const openAIMessages = [
-      { role: 'system', content: systemPrompt },
+      { role: 'system', content: finalSystemPrompt },
       ...messages.map(m => ({
         role:    m.role === 'ai' ? 'assistant' : 'user',
         content: m.content,
