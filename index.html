@@ -254,12 +254,17 @@
             </div>
             <!-- Mode chips -->
             <div id="mode-chips" class="mode-chips"></div>
-            <textarea id="chat-input" class="chat-input-clean" rows="1" placeholder="Describe what you want to build, or ask a scripting question…"></textarea>
-            <div class="input-btns" style="display:flex;align-items:center;gap:4px;">
-              <button id="btn-send" class="btn-send" title="Send">
-                <svg id="send-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
-                <svg id="stop-icon" width="14" height="14" viewBox="0 0 24 24" fill="currentColor" style="display:none;"><rect x="4" y="4" width="16" height="16" rx="2"/></svg>
-              </button>
+            <div class="animated-input-wrapper">
+              <div class="animated-border"></div>
+              <div class="input-content">
+                <textarea id="chat-input" class="chat-input-clean" rows="1" placeholder="Describe what you want to build, or ask a scripting question…"></textarea>
+                <div class="input-btns">
+                  <button id="btn-send" class="btn-send" title="Send">
+                    <svg id="send-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+                    <svg id="stop-icon" width="14" height="14" viewBox="0 0 24 24" fill="currentColor" style="display:none;"><rect x="4" y="4" width="16" height="16" rx="2"/></svg>
+                  </button>
+                </div>
+              </div>
             </div>
           </div>
         </div>
