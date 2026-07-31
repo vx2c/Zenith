@@ -1178,6 +1178,8 @@ html.dark .z-card-badge--error     { background: rgba(248,113,113,0.15); color: 
   padding: 8px 10px;
   gap: 8px;
   width: 100%;
+  min-width: 0;
+  flex: 1;
 }
 
 /* Chat Input: Clean inside wrapper - Modern AI style */
