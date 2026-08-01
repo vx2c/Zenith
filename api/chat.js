@@ -1296,6 +1296,8 @@ async function agentLoop(messages, apiKey, model, sessionId, res, needsStudio, t
   let readBeforeCreateGateUses = 0; // safety cap for the gate below
   let generalErrorGateUses = 0; // safety cap for the last-action-was-error gate
   let selfEvalAttempted = false; // Layer 3 — only ONE self-eval attempt per task (user requirement)
+  let lastCreatedContainerPath = null; // path of the last GUI container created, for the verifier gate below
+  let containerVerified = false; // one-shot — verifier checks Studio directly, at most once per task
   let awaitingSelfEval = false; // true right after asking for the [x]/[ ] checklist, until the next round
   let consecutiveReadRounds = 0; // read-only tools in a row without any write
   const toolResults = []; // Track all tool results to detect errors
@@ -1569,6 +1571,34 @@ async function agentLoop(messages, apiKey, model, sessionId, res, needsStudio, t
           },
         ];
         continue;
+      }
+
+      // ── Deterministic verifier: GUI container emptiness check ──────────────
+      // Not asking the model — calling Studio directly. Evidence #2 showed a
+      // GUI container created and declared done with nothing inside it. This
+      // makes ONE real get_tree call on the container's actual path and
+      // checks its real child count before letting the task finish.
+      if (lastCreatedContainerPath && !containerVerified && round < MAX_ROUNDS - 1) {
+        containerVerified = true;
+        const verifyResult = await executeStudioTool(sessionId, 'get_tree', { path: lastCreatedContainerPath, maxDepth: 2 }, { retries: 0 });
+        const childCount = (verifyResult && !verifyResult.error && typeof verifyResult.count === 'number') ? verifyResult.count : null;
+        if (childCount !== null && childCount <= 1) {
+          // count includes the container itself — <=1 means no real children.
+          messages = [
+            ...messages,
+            { role: 'assistant', content: text },
+            {
+              role: 'user',
+              content:
+                `SYSTEM: Verified directly in Studio — "${lastCreatedContainerPath}" currently has no content inside ` +
+                'it. If the request needed a label, button, or anything visible in that container, it is not there ' +
+                'yet. Do NOT stop here. Continue building inside it now.',
+            },
+          ];
+          continue;
+        }
+        // Has real children, or the verification call itself failed/was
+        // inconclusive — don't block on an inconclusive check, just proceed.
       }
 
       // ── Layer 3: explicit self-evaluation for substantial checklists ───────
@@ -1883,6 +1913,21 @@ async function agentLoop(messages, apiKey, model, sessionId, res, needsStudio, t
     toolsExecuted++;
     if (!isError && WRITE_TOOLS.has(toolCall.name)) writeToolsExecuted++;
     if (!isError && toolCall.name === 'read_script') readScriptExecuted = true;
+
+    // ── Deterministic verifier tracking (not model self-report) ────────────
+    // GUI containers (ScreenGui, Frame, ScrollingFrame, CanvasGroup) are
+    // useless empty — Evidence #2 in ZenithValidationLog.md showed the
+    // model creating one, then declaring done with nothing inside it. This
+    // does NOT ask the model to confirm; it records the real path so the
+    // gate below can independently query Studio itself before the task is
+    // allowed to finish.
+    const GUI_CONTAINER_CLASSES = new Set(['ScreenGui', 'Frame', 'ScrollingFrame', 'CanvasGroup']);
+    if (!isError && CREATE_TOOLS.has(toolCall.name) && toolResult?.path) {
+      const className = toolCall.args?.className || '';
+      if (GUI_CONTAINER_CLASSES.has(className)) {
+        lastCreatedContainerPath = toolResult.path;
+      }
+    }
 
     // Track which mentioned targets have been read (for investigation enforcement)
     if (!isError && toolCall.name === 'read_script' && mentionedTargets.length > 0) {
