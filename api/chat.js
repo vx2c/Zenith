@@ -9,6 +9,7 @@ const {
   isAskingClarification,
   describeToolCallFailure: _describeToolCallFailure,
 } = require('./agent/parser');
+const planner = require('./agent/planner');
 const {
   getSession,
   enqueueCommand,
@@ -960,23 +961,7 @@ const EXPLANATION_DIRECTIVE =
 
 // Stronger than CONTINUE_DIRECTIVE: used when the AI itself already announced
 // specific remaining steps (via PLAN: lines) that have not been done yet.
-// CONTINUE_DIRECTIVE's "genuinely already complete" escape hatch is exactly
-// what let the agent stop after writing just ONE piece of a multi-part
-// request (e.g. the money-on-death script, but not the GUI it also promised)
-// — that escape hatch does not apply here, because the AI's own prior
-// statements are proof the task isn't done.
-function buildPendingStepsDirective(pendingSteps) {
-  const list = pendingSteps.map((s, i) => `  ${i + 1}. ${s}`).join('\n');
-  return (
-    'DIRECTIVE — UNFINISHED PLAN MODE:\n' +
-    'You previously said you would do the following, and these are NOT done yet:\n' +
-    list + '\n\n' +
-    'Do NOT write a final response. Do NOT say the task is complete. The "genuinely already complete" ' +
-    'exception does not apply — you announced this work yourself and a developer is relying on you to ' +
-    'finish it. Start with a short "PLAN: <one sentence>" line naming which of the above you\'re doing next, ' +
-    'then output the TOOL:{...} JSON line for it.'
-  );
-}
+// See planner.buildContinuationDirective for the actual implementation.
 
 function buildCallMessages(messages, toolsExecuted, pendingSteps) {
   // Three phases:
@@ -987,7 +972,7 @@ function buildCallMessages(messages, toolsExecuted, pendingSteps) {
     toolsExecuted === 0
       ? TOOL_CALL_DIRECTIVE
       : (pendingSteps && pendingSteps.length > 0)
-        ? buildPendingStepsDirective(pendingSteps)
+        ? planner.buildContinuationDirective(pendingSteps)
         : CONTINUE_DIRECTIVE;
   // Merge the directive INTO the first system message content rather than
   // appending a new system message at the end of the conversation.
@@ -1194,23 +1179,21 @@ async function agentLoop(messages, apiKey, model, sessionId, res, needsStudio, t
     // tool call or explanation. Handle it here, before normal extraction.
     if (awaitingSelfEval) {
       awaitingSelfEval = false; // consumed regardless of outcome — one attempt only
-      const checklistLines = [...text.matchAll(/\[( |x|X)\]\s*(.+)/g)];
-      if (checklistLines.length === 0) {
+      const selfEval = planner.parseSelfEvalResponse(text);
+      if (selfEval.outcome === 'soft_pass') {
         // SOFT PASS: model ignored the checklist format entirely. Per the
         // agreed design, do NOT retry the self-eval and do NOT block —
         // let this response flow through the normal path below exactly as
         // if no self-eval had been requested. The existing (coarser)
         // pendingSteps gate still applies as a fallback since pendingSteps
         // is untouched here.
+      } else if (selfEval.outcome === 'all_done') {
+        // Model explicitly confirms everything is done. This is more
+        // trustworthy than our fuzzy label-matching, so it wins — clear
+        // pendingSteps and let the normal !toolCall completion logic
+        // below (which already exists and is already correct) accept it.
+        pendingSteps.length = 0;
       } else {
-        const stillPending = checklistLines.filter(m => m[1].trim().toLowerCase() !== 'x');
-        if (stillPending.length === 0) {
-          // Model explicitly confirms everything is done. This is more
-          // trustworthy than our fuzzy label-matching, so it wins — clear
-          // pendingSteps and let the normal !toolCall completion logic
-          // below (which already exists and is already correct) accept it.
-          pendingSteps.length = 0;
-        } else {
           messages = [
             ...messages,
             { role: 'assistant', content: text },
@@ -1218,12 +1201,11 @@ async function agentLoop(messages, apiKey, model, sessionId, res, needsStudio, t
               role: 'user',
               content:
                 'SYSTEM: You confirmed these are still NOT done:\n' +
-                stillPending.map((m, i) => `  ${i + 1}. ${m[2].trim()}`).join('\n') + '\n\n' +
+                selfEval.items.map((s, i) => `  ${i + 1}. ${s}`).join('\n') + '\n\n' +
                 'Continue now — output ONLY the next TOOL:{...} for the first one on that list.',
             },
           ];
           continue;
-        }
       }
     }
 
@@ -1415,15 +1397,7 @@ async function agentLoop(messages, apiKey, model, sessionId, res, needsStudio, t
         messages = [
           ...messages,
           { role: 'assistant', content: text },
-          {
-            role: 'user',
-            content:
-              'SYSTEM: Before finishing, confirm the real status of everything from your plan. Reply with ' +
-              'EXACTLY this checklist, one line per item below, marking each [x] (verified done) or [ ] (not ' +
-              'done) based on what you actually did — not what you assume:\n\n' +
-              pendingSteps.map(s => `[ ] ${s}`).join('\n') + '\n\n' +
-              'Output ONLY the checklist, nothing else.',
-          },
+          { role: 'user', content: planner.buildSelfEvalRequest(pendingSteps) },
         ];
         continue;
       }
@@ -1624,22 +1598,16 @@ async function agentLoop(messages, apiKey, model, sessionId, res, needsStudio, t
         // one survives independently. Previously the whole blob was pushed
         // as ONE entry and got removed the instant the FIRST tool matched
         // any part of it, silently dropping the rest of the checklist.
-        const numberedItems = [...planText.matchAll(/\d+\.\s*([^\d].*?)(?=\s*\d+\.|$)/gs)]
-          .map(m => m[1].trim())
-          .filter(Boolean);
-        const stepsToAdd = numberedItems.length > 1 ? numberedItems : [planText];
-        if (numberedItems.length > 1 && pendingStepsAreAutoSeeded) {
-          // The model just provided its own detailed breakdown for the
-          // first time — replace the generic server-seeded checklist
-          // instead of piling the model's items on top of it.
-          task.plan = stepsToAdd;
+        const numberedItems = planner.parseModelPlan(planText);
+        const wasAutoSeededBefore = pendingStepsAreAutoSeeded;
+        const merged = planner.mergeOrReplace(task.plan, numberedItems, wasAutoSeededBefore);
+        task.plan = merged.plan;
+        pendingStepsAreAutoSeeded = merged.stillAutoSeeded;
+        const didReplace = numberedItems.length > 1 && wasAutoSeededBefore && !merged.stillAutoSeeded;
+        if (didReplace) {
           pendingSteps.length = 0;
-          pendingSteps.push(...stepsToAdd);
-          pendingStepsAreAutoSeeded = false;
-        } else {
-          task.plan = [...(task.plan || []), ...stepsToAdd];
-          pendingSteps.push(...stepsToAdd);
         }
+        pendingSteps.push(...merged.pendingSteps);
         emitWorkspaceEvent({
           id: 'workspace-plan',
           type: 'plan',
@@ -1760,21 +1728,11 @@ async function agentLoop(messages, apiKey, model, sessionId, res, needsStudio, t
       const stepLabel = tlDetail ? `${tlLabel}: ${tlDetail}` : tlLabel;
       if (!isError) {
         completedSteps.push(stepLabel);
-        // Fuzzy matching: check exact match, contains, and keyword overlap
-        const pendingIndex = pendingSteps.findIndex(step => {
-          if (step === stepLabel) return true;
-          if (step.includes(tlLabel)) return true;
-          // Check if key words from the tool action match the pending step
-          const stepLower = step.toLowerCase();
-          const labelLower = stepLabel.toLowerCase();
-          // Extract main action words (nouns/verbs) from both
-          const stepWords = stepLower.match(/\b[a-z]{4,}\b/g) || [];
-          const labelWords = labelLower.match(/\b[a-z]{4,}\b/g) || [];
-          // If 2+ significant words overlap, consider it a match
-          const overlap = stepWords.filter(w => labelWords.includes(w)).length;
-          return overlap >= 2;
+        const matchResult = planner.markCompleted(pendingSteps, {
+          toolName: toolCall.name, args: toolCall.args || {}, tlLabel, tlDetail,
         });
-        if (pendingIndex >= 0) pendingSteps.splice(pendingIndex, 1);
+        pendingSteps.length = 0;
+        pendingSteps.push(...matchResult.pendingSteps);
       }
       emitWorkspaceEvent({
         id: `workspace-tool-${round}`,
