@@ -10,6 +10,7 @@ const {
   describeToolCallFailure: _describeToolCallFailure,
 } = require('./agent/parser');
 const planner = require('./agent/planner');
+const goalManager = require('./agent/goalManager');
 const {
   getSession,
   enqueueCommand,
@@ -1118,14 +1119,15 @@ async function agentLoop(messages, apiKey, model, sessionId, res, needsStudio, t
   }
 
   if (task?.taskId) {
+    const startState = goalManager.computeStartState(task.objective);
     emitWorkspaceEvent({
       id: 'workspace-plan',
       type: 'plan',
-      status: 'running',
-      label: 'Planning workspace task',
-      detail: task.objective,
+      status: startState.status,
+      label: startState.label,
+      detail: startState.detail,
     });
-    await persistTask({ status: 'running', nextAction: 'Choose the first tool required by the objective.' });
+    await persistTask({ status: startState.status, nextAction: startState.nextAction });
   }
 
   for (let round = 0; round < MAX_ROUNDS; round++) {
@@ -1509,35 +1511,25 @@ async function agentLoop(messages, apiKey, model, sessionId, res, needsStudio, t
       // Do NOT report this as a completed task — that was misleading the
       // developer into thinking Studio was updated when the plugin never
       // even received a command. Report it as failed instead.
-      const neverExecuted = toolsExecuted === 0;
-      const readOnlyDespiteWriteIntent = !neverExecuted && writeToolsExecuted === 0 && anyWriteIntent;
-      const taskStatus = neverExecuted ? 'failed' : readOnlyDespiteWriteIntent ? 'incomplete' : 'completed';
+      const finalState = goalManager.computeFinalState({
+        toolsExecuted, writeToolsExecuted, anyWriteIntent, failureDetail: failure?.detail,
+      });
       if (task?.taskId) {
         await persistTask({
-          status: taskStatus,
+          status: finalState.status,
           currentTool: null,
           lastToolResult: null,
-          nextAction:
-            taskStatus === 'failed'
-              ? 'The AI could not produce a valid tool call. Try again, possibly with a simpler request.'
-              : taskStatus === 'incomplete'
-                ? 'The AI only inspected the project and never made the requested change. Ask it to continue/retry.'
-                : 'Task complete. Review the verified result above.',
+          nextAction: finalState.nextAction,
         });
         emitWorkspaceEvent({
           id: 'workspace-task',
           type: 'task',
-          status: taskStatus === 'completed' ? 'completed' : 'error',
-          label:
-            taskStatus === 'failed'
-              ? 'Workspace task failed — no Studio action was executed'
-              : taskStatus === 'incomplete'
-                ? 'Workspace task incomplete — only inspected, nothing was built'
-                : 'Workspace task completed',
-          ...(taskStatus !== 'completed' && failure?.detail ? { error: failure.detail } : {}),
+          status: finalState.eventStatus,
+          label: finalState.label,
+          ...(finalState.error ? { error: finalState.error } : {}),
         });
       }
-      if (neverExecuted && needsStudio) {
+      if (finalState.neverExecuted && needsStudio) {
         writeSSE(res, {
           error:
             'Zenith could not generate a valid Studio command for this request ' +
@@ -1766,17 +1758,18 @@ async function agentLoop(messages, apiKey, model, sessionId, res, needsStudio, t
   }
 
   if (task?.taskId) {
+    const blockedState = goalManager.computeBlockedState(toolsExecuted);
     await persistTask({
-      status: 'blocked',
+      status: blockedState.status,
       currentTool: null,
-      nextAction: 'Tool limit reached for this message. Send "continue" to keep going — nothing was lost.',
+      nextAction: blockedState.nextAction,
     });
     emitWorkspaceEvent({
       id: 'workspace-task',
       type: 'task',
-      status: 'error',
-      label: `Workspace task paused after ${toolsExecuted} step${toolsExecuted === 1 ? '' : 's'} — reached the per-message limit`,
-      error: 'Tool call limit reached for this message.',
+      status: blockedState.eventStatus,
+      label: blockedState.label,
+      error: blockedState.error,
     });
   }
   writeSSE(res, {
