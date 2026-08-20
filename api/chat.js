@@ -11,7 +11,7 @@ const {
 } = require('./agent/parser');
 const planner = require('./agent/planner');
 const goalManager = require('./agent/goalManager');
-const { buildVerification, verifyReadback } = require('./agent/verifier');
+const { buildVerification, verifyReadback, unwrapToolResult } = require('./agent/verifier');
 const {
   hasWriteIntent,
   hasBugReportIntent,
@@ -946,6 +946,8 @@ async function agentLoop(messages, apiKey, model, sessionId, res, needsStudio, t
   let consecutiveReadRounds = 0; // read-only tools in a row without any write
   const toolResults = []; // Track all tool results to detect errors
   const failedToolFingerprints = new Map();
+    const inspectedParents = new Set();
+    const checkedInstanceNames = new Set();
   const completedSteps = [];
   const evidence = [];
   const pendingVerifications = [];
@@ -1380,6 +1382,7 @@ async function agentLoop(messages, apiKey, model, sessionId, res, needsStudio, t
         pendingSteps,
         pendingVerifications,
         evidence,
+        failedToolCalls: toolResults.filter(result => result && result.error).length,
         failureDetail: failure?.detail,
       });
       if (task?.taskId) {
@@ -1532,6 +1535,28 @@ async function agentLoop(messages, apiKey, model, sessionId, res, needsStudio, t
 
     // Do not send an identical call back to Studio after it already failed.
     // Recovery must change the path, query, or strategy.
+        if (toolCall.name === 'create_remote_event' || toolCall.name === 'create_remote_function') {
+          const parent = typeof toolCall.args?.parent === 'string' ? toolCall.args.parent : '';
+          const name = typeof toolCall.args?.name === 'string' ? toolCall.args.name : '';
+          const targetKey = `${parent}.${name}`;
+          if (!inspectedParents.has(parent) || !checkedInstanceNames.has(targetKey)) {
+            const missing = !inspectedParents.has(parent)
+              ? `First inspect ${parent} with get_tree, then search for ${name}.`
+              : `First search ${name} under ${parent} with find_instances.`;
+            messages = [
+              ...messages,
+              { role: 'assistant', content: text },
+              {
+                role: 'user',
+                content:
+                  `SYSTEM: Preflight blocked ${toolCall.name}. ${missing} ` +
+                  'Do not call the mutating tool until both checks have returned real TOOL_RESULT evidence. Output only the required read TOOL:{...} call.',
+              },
+            ];
+            continue;
+          }
+        }
+
     const toolFingerprint = JSON.stringify({ name: toolCall.name, args: toolCall.args || {} });
     const previousFailures = failedToolFingerprints.get(toolFingerprint) || 0;
     if (previousFailures > 0) {
@@ -1567,11 +1592,18 @@ async function agentLoop(messages, apiKey, model, sessionId, res, needsStudio, t
     // Execute the tool
     const toolResult = await executeStudioTool(sessionId, toolCall.name, toolCall.args || {});
     const isError = !!(toolResult && toolResult.error);
+      const resultData = unwrapToolResult(toolResult);
     toolResults.push(toolResult); // Track result for error detection
     if (isError) failedToolFingerprints.set(toolFingerprint, previousFailures + 1);
     toolsExecuted++;
     if (!isError && WRITE_TOOLS.has(toolCall.name)) writeToolsExecuted++;
     if (!isError && toolCall.name === 'read_script') readScriptExecuted = true;
+    if (!isError && toolCall.name === 'get_tree' && typeof toolCall.args?.path === 'string') {
+      inspectedParents.add(toolCall.args.path);
+    }
+    if (!isError && toolCall.name === 'find_instances' && typeof toolCall.args?.path === 'string' && typeof toolCall.args?.query === 'string') {
+      checkedInstanceNames.add(`${toolCall.args.path}.${toolCall.args.query}`);
+    }
 
     // ── Deterministic verifier tracking (not model self-report) ────────────
     // GUI containers (ScreenGui, Frame, ScrollingFrame, CanvasGroup) are
@@ -1668,6 +1700,8 @@ async function agentLoop(messages, apiKey, model, sessionId, res, needsStudio, t
       await persistTask({
         currentTool: null,
         lastToolResult: serializedResult.length > 4000 ? serializedResult.slice(0, 4000) + '…' : toolResult,
+        lastToolError: isError ? toolResult.error : null,
+        lastToolData: !isError ? resultData : null,
         nextAction: isError
           ? 'Evaluate the tool error and choose a safe recovery or explain the failure.'
           : pendingVerifications.length > 0
