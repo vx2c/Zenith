@@ -810,7 +810,7 @@ async function sendMsg(content) {
     : state.finalTaskLabel
       || (state.finalTaskStatus === 'error'   ? 'Workspace task failed'
         : state.finalTaskStatus === 'blocked' ? 'Task limit reached — continue in a new message'
-        : 'Workspace task complete');
+        : 'Workspace task status unavailable');
   el('activity-summary').textContent = taskSummaryText;
 
   const responseMs = Date.now() - t0;
