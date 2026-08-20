@@ -945,6 +945,7 @@ async function agentLoop(messages, apiKey, model, sessionId, res, needsStudio, t
   let awaitingSelfEval = false; // true right after asking for the [x]/[ ] checklist, until the next round
   let consecutiveReadRounds = 0; // read-only tools in a row without any write
   const toolResults = []; // Track all tool results to detect errors
+  const failedToolFingerprints = new Map();
   const completedSteps = [];
   const evidence = [];
   const pendingVerifications = [];
@@ -1529,10 +1530,45 @@ async function agentLoop(messages, apiKey, model, sessionId, res, needsStudio, t
       });
     }
 
+    // Do not send an identical call back to Studio after it already failed.
+    // Recovery must change the path, query, or strategy.
+    const toolFingerprint = JSON.stringify({ name: toolCall.name, args: toolCall.args || {} });
+    const previousFailures = failedToolFingerprints.get(toolFingerprint) || 0;
+    if (previousFailures > 0) {
+      const recoveryMessage =
+        `The exact Studio tool call failed ${previousFailures} time${previousFailures === 1 ? '' : 's'}: ` +
+        `${toolCall.name} ${JSON.stringify(toolCall.args || {})}. ` +
+        'Do not repeat it. Recover with a broader search, get_tree on a real parent, or ask a specific question.';
+      writeSSE(res, { timeline: {
+        id: round,
+        label: 'Recovery required',
+        status: 'error',
+        tool: toolCall.name,
+        error: 'Repeated failed tool call was blocked before execution.',
+      } });
+      if (task?.taskId) {
+        emitWorkspaceEvent({
+          id: `workspace-recovery-${round}`,
+          type: 'task',
+          status: 'error',
+          label: 'Recovering from repeated tool failure',
+          error: recoveryMessage,
+        });
+        await persistTask({ status: 'recovering', currentTool: null, nextAction: recoveryMessage });
+      }
+      messages = [
+        ...messages,
+        { role: 'assistant', content: text },
+        { role: 'user', content: `SYSTEM: ${recoveryMessage}` },
+      ];
+      continue;
+    }
+
     // Execute the tool
     const toolResult = await executeStudioTool(sessionId, toolCall.name, toolCall.args || {});
     const isError = !!(toolResult && toolResult.error);
     toolResults.push(toolResult); // Track result for error detection
+    if (isError) failedToolFingerprints.set(toolFingerprint, previousFailures + 1);
     toolsExecuted++;
     if (!isError && WRITE_TOOLS.has(toolCall.name)) writeToolsExecuted++;
     if (!isError && toolCall.name === 'read_script') readScriptExecuted = true;
@@ -1576,6 +1612,14 @@ async function agentLoop(messages, apiKey, model, sessionId, res, needsStudio, t
           verifiedAt: Date.now(),
         });
         completedSteps.push(`${verification.toolName} verified: ${verification.expectedPath || toolCall.name}`);
+        const matchResult = planner.markCompleted(pendingSteps, {
+          toolName: verification.toolName,
+          args: verification.writeArgs || {},
+          tlLabel: toolLabelFor(verification.toolName),
+          tlDetail: toolDetailFor(verification.toolName, verification.writeArgs || {}),
+        });
+        pendingSteps.length = 0;
+        pendingSteps.push(...matchResult.pendingSteps);
       } else if (WRITE_TOOLS.has(toolCall.name)) {
         const verification = buildVerification(toolCall.name, toolCall.args || {}, toolResult);
         if (verification) {
@@ -1610,15 +1654,6 @@ async function agentLoop(messages, apiKey, model, sessionId, res, needsStudio, t
       ...(isError ? { error: toolResult.error } : {}),
     } });
     if (task?.taskId) {
-      const stepLabel = tlDetail ? `${tlLabel}: ${tlDetail}` : tlLabel;
-      if (!isError) {
-        completedSteps.push(stepLabel);
-        const matchResult = planner.markCompleted(pendingSteps, {
-          toolName: toolCall.name, args: toolCall.args || {}, tlLabel, tlDetail,
-        });
-        pendingSteps.length = 0;
-        pendingSteps.push(...matchResult.pendingSteps);
-      }
       emitWorkspaceEvent({
         id: `workspace-tool-${round}`,
         type: 'tool',
