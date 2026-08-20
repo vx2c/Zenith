@@ -25,13 +25,14 @@ function computeStartState(objective) {
   };
 }
 
-function computeFinalState({ toolsExecuted, writeToolsExecuted, anyWriteIntent, pendingSteps = [], pendingVerifications = [], evidence = [], failureDetail }) {
+function computeFinalState({ toolsExecuted, writeToolsExecuted, anyWriteIntent, pendingSteps = [], pendingVerifications = [], evidence = [], failedToolCalls = 0, failureDetail }) {
   const neverExecuted = toolsExecuted === 0;
   const readOnlyDespiteWriteIntent = !neverExecuted && writeToolsExecuted === 0 && anyWriteIntent;
   const hasUnverifiedWrites = pendingVerifications.length > 0 || (writeToolsExecuted > 0 && evidence.length < writeToolsExecuted);
+  const hasToolFailures = failedToolCalls > 0;
   const status = neverExecuted
     ? 'failed'
-    : readOnlyDespiteWriteIntent || pendingSteps.length > 0 || hasUnverifiedWrites
+    : readOnlyDespiteWriteIntent || pendingSteps.length > 0 || hasUnverifiedWrites || hasToolFailures
       ? 'incomplete'
       : 'completed';
 
