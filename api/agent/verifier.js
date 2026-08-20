@@ -35,6 +35,7 @@ function buildVerification(toolName, args = {}, result) {
     case 'format_script':
       return {
         toolName,
+        writeArgs: { ...args },
         tool: 'read_script',
         args: { path },
         expectedPath: path,
@@ -42,9 +43,9 @@ function buildVerification(toolName, args = {}, result) {
         mode: toolName === 'append_script' ? 'contains' : 'source',
       };
     case 'set_properties':
-      return { toolName, tool: 'get_properties', args: { path }, expectedPath: path, expected: args.properties || {} };
+      return { toolName, writeArgs: { ...args }, tool: 'get_properties', args: { path }, expectedPath: path, expected: args.properties || {} };
     case 'set_attributes':
-      return { toolName, tool: 'get_attributes', args: { path }, expectedPath: path, expected: args.attributes || {} };
+      return { toolName, writeArgs: { ...args }, tool: 'get_attributes', args: { path }, expectedPath: path, expected: args.attributes || {} };
     case 'create_instance':
     case 'create_gui':
     case 'create_ui_element':
@@ -55,13 +56,13 @@ function buildVerification(toolName, args = {}, result) {
     case 'create_remote_event':
     case 'create_remote_function':
     case 'create_folder':
-      return { toolName, tool: 'get_tree', args: { path, maxDepth: 6, maxNodes: 500 }, expectedPath: path };
+      return { toolName, writeArgs: { ...args }, tool: 'get_tree', args: { path, maxDepth: 6, maxNodes: 500 }, expectedPath: path };
     case 'rename_instance':
     case 'move_instance':
     case 'clone_instance':
-      return { toolName, tool: 'find_instances', args: { query: args.name || path?.split('.').pop(), maxResults: 20 }, expectedPath: path };
+      return { toolName, writeArgs: { ...args }, tool: 'find_instances', args: { query: args.name || path?.split('.').pop(), maxResults: 20 }, expectedPath: path };
     case 'delete_instance':
-      return { toolName, tool: 'get_tree', args: { path: path?.split('.').slice(0, -1).join('.'), maxDepth: 2, maxNodes: 100 }, expectedPath: path, mode: 'absent' };
+      return { toolName, writeArgs: { ...args }, tool: 'get_tree', args: { path: path?.split('.').slice(0, -1).join('.'), maxDepth: 2, maxNodes: 100 }, expectedPath: path, mode: 'absent' };
     default:
       return null;
   }
