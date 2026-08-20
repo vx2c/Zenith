@@ -11,6 +11,7 @@ const {
 } = require('./agent/parser');
 const planner = require('./agent/planner');
 const goalManager = require('./agent/goalManager');
+const { buildVerification, verifyReadback } = require('./agent/verifier');
 const {
   hasWriteIntent,
   hasBugReportIntent,
@@ -945,6 +946,8 @@ async function agentLoop(messages, apiKey, model, sessionId, res, needsStudio, t
   let consecutiveReadRounds = 0; // read-only tools in a row without any write
   const toolResults = []; // Track all tool results to detect errors
   const completedSteps = [];
+  const evidence = [];
+  const pendingVerifications = [];
   const taskEvents = [];
   const pendingSteps = Array.isArray(task?.plan) ? [...task.plan] : [];
   // True until the model writes its OWN numbered plan for the first time.
@@ -1014,13 +1017,7 @@ async function agentLoop(messages, apiKey, model, sessionId, res, needsStudio, t
     // Inject the per-phase directive as the final system message so the
     // model always reads the current-phase instruction last.
     if (pendingSteps.length > 0) {
-      if (pendingStepsForcedRounds >= MAX_PENDING_STEPS_ROUNDS) {
-        // The fuzzy label-matching likely never cleared these — trust the
-        // model's own judgment from here instead of forcing more rounds.
-        pendingSteps.length = 0;
-      } else {
-        pendingStepsForcedRounds++;
-      }
+      pendingStepsForcedRounds++;
     }
     const callMessages = buildCallMessages(messages, toolsExecuted, pendingSteps);
     const result = await streamWithCollection(callMessages, apiKey, model);
@@ -1051,11 +1048,14 @@ async function agentLoop(messages, apiKey, model, sessionId, res, needsStudio, t
         // pendingSteps gate still applies as a fallback since pendingSteps
         // is untouched here.
       } else if (selfEval.outcome === 'all_done') {
-        // Model explicitly confirms everything is done. This is more
-        // trustworthy than our fuzzy label-matching, so it wins — clear
-        // pendingSteps and let the normal !toolCall completion logic
-        // below (which already exists and is already correct) accept it.
-        pendingSteps.length = 0;
+        // A model checklist is not evidence. Keep pending work until the
+        // backend observes the required tool result and read-back evidence.
+        messages = [
+          ...messages,
+          { role: 'assistant', content: text },
+          { role: 'user', content: 'SYSTEM: Your checklist is not verification. Continue with the next required TOOL:{...} or the task will remain incomplete.' },
+        ];
+        continue;
       } else {
           messages = [
             ...messages,
@@ -1373,7 +1373,13 @@ async function agentLoop(messages, apiKey, model, sessionId, res, needsStudio, t
       // developer into thinking Studio was updated when the plugin never
       // even received a command. Report it as failed instead.
       const finalState = goalManager.computeFinalState({
-        toolsExecuted, writeToolsExecuted, anyWriteIntent, failureDetail: failure?.detail,
+        toolsExecuted,
+        writeToolsExecuted,
+        anyWriteIntent,
+        pendingSteps,
+        pendingVerifications,
+        evidence,
+        failureDetail: failure?.detail,
       });
       if (task?.taskId) {
         await persistTask({
@@ -1556,6 +1562,32 @@ async function agentLoop(messages, apiKey, model, sessionId, res, needsStudio, t
       }
     }
 
+    if (!isError) {
+      const completedToolLabel = tlDetail ? `${tlLabel}: ${tlDetail}` : tlLabel;
+      const verificationIndex = pendingVerifications.findIndex(item =>
+        item.tool === toolCall.name && verifyReadback(item, toolResult)
+      );
+      if (verificationIndex >= 0) {
+        const verification = pendingVerifications.splice(verificationIndex, 1)[0];
+        evidence.push({
+          writeTool: verification.toolName,
+          verificationTool: verification.tool,
+          path: verification.expectedPath || null,
+          verifiedAt: Date.now(),
+        });
+        completedSteps.push(`${verification.toolName} verified: ${verification.expectedPath || toolCall.name}`);
+      } else if (WRITE_TOOLS.has(toolCall.name)) {
+        const verification = buildVerification(toolCall.name, toolCall.args || {}, toolResult);
+        if (verification) {
+          pendingVerifications.push(verification);
+        } else {
+          completedSteps.push(completedToolLabel);
+        }
+      } else {
+        completedSteps.push(completedToolLabel);
+      }
+    }
+
     // Track consecutive read-only rounds for the read-loop guard
     const READ_ONLY_TOOLS = new Set([
       'ping', 'get_tree', 'find_instances', 'get_selection', 'search_scripts',
@@ -1603,7 +1635,11 @@ async function agentLoop(messages, apiKey, model, sessionId, res, needsStudio, t
         lastToolResult: serializedResult.length > 4000 ? serializedResult.slice(0, 4000) + '…' : toolResult,
         nextAction: isError
           ? 'Evaluate the tool error and choose a safe recovery or explain the failure.'
-          : 'Evaluate TOOL_RESULT and continue until the objective is verified.',
+          : pendingVerifications.length > 0
+            ? `Verify the result with ${pendingVerifications[0].tool}.`
+            : 'Evaluate TOOL_RESULT and continue until the objective is verified.',
+        evidence,
+        pendingVerifications,
       });
     }
 
