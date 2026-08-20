@@ -25,24 +25,29 @@ function computeStartState(objective) {
   };
 }
 
-function computeFinalState({ toolsExecuted, writeToolsExecuted, anyWriteIntent, failureDetail }) {
+function computeFinalState({ toolsExecuted, writeToolsExecuted, anyWriteIntent, pendingSteps = [], pendingVerifications = [], evidence = [], failureDetail }) {
   const neverExecuted = toolsExecuted === 0;
   const readOnlyDespiteWriteIntent = !neverExecuted && writeToolsExecuted === 0 && anyWriteIntent;
-  const status = neverExecuted ? 'failed' : readOnlyDespiteWriteIntent ? 'incomplete' : 'completed';
+  const hasUnverifiedWrites = pendingVerifications.length > 0 || (writeToolsExecuted > 0 && evidence.length < writeToolsExecuted);
+  const status = neverExecuted
+    ? 'failed'
+    : readOnlyDespiteWriteIntent || pendingSteps.length > 0 || hasUnverifiedWrites
+      ? 'incomplete'
+      : 'completed';
 
   const nextAction =
     status === 'failed'
       ? 'The AI could not produce a valid tool call. Try again, possibly with a simpler request.'
       : status === 'incomplete'
         ? 'The AI only inspected the project and never made the requested change. Ask it to continue/retry.'
-        : 'Task complete. Review the verified result above.';
+        : 'Task complete. Every requested change has verified evidence.';
 
   const label =
     status === 'failed'
       ? 'Workspace task failed — no Studio action was executed'
       : status === 'incomplete'
         ? 'Workspace task incomplete — only inspected, nothing was built'
-        : 'Workspace task completed';
+        : 'Workspace task completed - all changes verified';
 
   const eventStatus = status === 'completed' ? 'completed' : 'error';
 
